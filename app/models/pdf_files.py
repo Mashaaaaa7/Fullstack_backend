@@ -1,7 +1,8 @@
 from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey
 from sqlalchemy.orm import relationship
-from app.core.database import Base
 from datetime import datetime
+
+from app.models import Base
 
 
 class PDFFile(Base):
