@@ -1,2 +1,4 @@
-.idea
-app.db
+/.venv/
+/run.py
+/uploads/
+/.idea/
