@@ -29,3 +29,6 @@ class ActionHistory(Base):
     user_id = Column(Integer, ForeignKey("user.user_id"))
 
     user = relationship("User", back_populates="action_history")
+
+
+    #
