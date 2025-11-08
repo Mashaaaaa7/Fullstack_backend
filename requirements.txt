@@ -1,8 +1,2 @@
-fastapi
-uvicorn
 sqlalchemy
-pydantic
-python-jose
-python-multipart
-pydantic[email]
-passlib[argon2]
+fastapi
