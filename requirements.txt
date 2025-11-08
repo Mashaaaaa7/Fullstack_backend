@@ -1,3 +1,6 @@
+torch
+pdfplumber
+transformers
 fastapi
 uvicorn
 sqlalchemy

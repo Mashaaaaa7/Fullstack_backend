@@ -1,8 +1,9 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
-from sqlalchemy.orm import declarative_base, relationship
-import datetime
+# app/models.py
 
-Base = declarative_base()
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
+from sqlalchemy.orm import relationship
+from app.database import Base
+import datetime
 
 
 class User(Base):
@@ -23,20 +24,21 @@ class PDFFile(Base):
 
     id = Column(Integer, primary_key=True)
     file_name = Column(String(255), nullable=False)
-    file_path = Column(String(500), nullable=False)
+    file_path = Column(String(500), nullable=True)  # ✅ Сделал nullable
     user_id = Column(Integer, ForeignKey('users.user_id', ondelete='CASCADE'), nullable=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    file_size = Column(Integer, nullable=True)  # ✅ Добавил для истории
 
     user = relationship("User", back_populates="pdf_files")
+
 
 class ActionHistory(Base):
     __tablename__ = "action_history"
 
     id = Column(Integer, primary_key=True)
-    action = Column(String(100), nullable=False)  # 'upload', 'download', 'delete'
+    action = Column(String(100), nullable=False)
     filename = Column(String(255), nullable=False)
     user_id = Column(Integer, ForeignKey('users.user_id', ondelete='CASCADE'), nullable=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
-    # Связь с User
     user = relationship("User", back_populates="action_history")
