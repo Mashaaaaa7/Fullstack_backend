@@ -1,152 +1,239 @@
 from transformers import pipeline
 import pdfplumber
 import re
+import unicodedata
 from typing import List, Dict
 import torch
+import random
 
 
 class QAGenerator:
     def __init__(self):
         self.device = 0 if torch.cuda.is_available() else -1
 
-        print("⏳ Загружаю модель для генерации вопросов...")
+        print("⏳ Загружаю модель для генерации контента...")
 
-        self.qg_pipeline = pipeline(
+        # Используем одну модель для генерации вопросов и ответов
+        self.generator = pipeline(
             "text2text-generation",
             model="google/flan-t5-small",
-            device=self.device
+            device=self.device,
+            torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32
         )
 
-        print("⏳ Загружаю модель для поиска ответов...")
-        self.qa_pipeline = pipeline(
-            "question-answering",
-            model="deepset/roberta-base-squad2",
-            device=self.device
-        )
+        print("✅ Модель загружена!")
 
-        print("✅ Обе модели загружены!")
+    def clean_text(self, text: str) -> str:
+        """Очищает текст от артефактов"""
+        if not text:
+            return ""
 
-    def extract_text_chunks(self, file_path: str) -> List[Dict]:
+        # Удаляем невидимые символы
+        text = ''.join(ch for ch in text if unicodedata.category(ch)[0] != 'C' or ch in '\n\t')
+
+        # Удаляем множественные пробелы и странные символы
+        text = re.sub(r'[>~<•»«„"\[\]]+', '', text)
+        text = re.sub(r'\s+', ' ', text).strip()
+
+        return text
+
+    def extract_meaningful_text(self, file_path: str) -> List[Dict]:
+        """Извлекает осмысленные фрагменты текста"""
         chunks = []
         try:
             with pdfplumber.open(file_path) as pdf:
                 print(f"📄 PDF имеет {len(pdf.pages)} страниц")
 
                 for i, page in enumerate(pdf.pages):
-                    text = page.extract_text()
+                    raw_text = page.extract_text()
 
-                    if not text or not text.strip():
-                        print(f"⚠️ Страница {i + 1}: текст не найден (возможно сканированное изображение)")
+                    if not raw_text:
                         continue
 
-                    # Очищаем текст от лишних символов
-                    text = re.sub(r'\s+', ' ', text).strip()
+                    # Очищаем текст
+                    text = self.clean_text(raw_text)
 
-                    if len(text) < 50:
-                        print(f"⚠️ Страница {i + 1}: текст слишком короткий ({len(text)} символов)")
+                    if len(text) < 100:
                         continue
 
-                    # Разбиваем на предложения
-                    sentences = re.split(r'[.!?]+\s+', text)
+                    # Разбиваем на абзацы и предложения
+                    paragraphs = [p.strip() for p in text.split('\n\n') if len(p.strip()) > 50]
 
-                    for sent in sentences:
-                        sent = sent.strip()
-                        # Требуем минимум 20 символов и максимум 300
-                        if 20 <= len(sent) <= 400:
-                            chunks.append({
-                                "text": sent,
-                                "page": i + 1
-                            })
+                    for para in paragraphs:
+                        # Разбиваем на предложения
+                        sentences = re.split(r'[.!?]+\s+', para)
 
-                    print(f"✅ Страница {i + 1}: извлечено {len([c for c in chunks if c['page'] == i + 1])} предложений")
+                        for sent in sentences:
+                            sent = self.clean_text(sent)
+                            words = sent.split()
 
-                print(f"📊 Всего чанков: {len(chunks)}")
+                            # Отбираем содержательные предложения
+                            if (15 <= len(words) <= 40 and
+                                    len(sent) > 30 and
+                                    any(word.istitle() for word in words) and
+                                    not any(tech in sent.lower() for tech in ['function', 'var ', 'const ', 'import'])):
+                                chunks.append({
+                                    "text": sent,
+                                    "page": i + 1,
+                                    "word_count": len(words)
+                                })
+
+            print(f"📊 Найдено {len(chunks)} содержательных фрагментов")
+            return chunks
+
         except Exception as e:
             print(f"❌ Ошибка при извлечении текста: {e}")
             return []
 
-        return chunks
-
-    def generate_question(self, context: str, answer_highlight: str) -> str:
+    def generate_qa_pair(self, context: str) -> Dict:
+        """Генерирует пару вопрос-ответ из контекста"""
         try:
-            # Ограничиваем длину для модели
-            context_clean = context[:200].replace("\n", " ").strip()
-            answer_clean = answer_highlight[:30].replace("\n", " ").strip()
+            # Ограничиваем длину контекста для модели
+            context_clean = self.clean_text(context[:500])
 
-            if not context_clean or not answer_clean:
-                return f"Вопрос о {answer_clean[:20]}"
+            if len(context_clean) < 30:
+                return None
 
-            input_text = f"generate question: {context_clean} answer: {answer_clean}"
+            # Промпт для генерации вопроса
+            question_prompt = f"""
+            Создай учебный вопрос на основе этого текста: {context_clean}
+            Вопрос должен проверять понимание материала.
+            """
 
-            result = self.qg_pipeline(
-                input_text,
-                max_new_tokens=32,
-                num_beams=2
+            question_result = self.generator(
+                question_prompt,
+                max_new_tokens=50,
+                num_beams=2,
+                temperature=0.8
             )
-            question = result[0]['generated_text'].strip()
 
-            question = question.replace("generate question:", "").strip()
+            question = self.clean_text(question_result[0]['generated_text'])
 
-            if not question or len(question) < 5:
-                question = f"Что значит '{answer_clean}'?"
+            # Убеждаемся, что вопрос заканчивается знаком вопроса
+            if not question.endswith('?'):
+                question += '?'
 
-            if not question.endswith("?"):
-                question += "?"
+            # Генерируем ответ на основе контекста
+            answer_prompt = f"""
+            На основе текста: {context_clean}
+            Дай развернутый ответ на вопрос: {question}
+            Ответ должен быть информативным и точным.
+            """
 
-            return question
+            answer_result = self.generator(
+                answer_prompt,
+                max_new_tokens=100,
+                num_beams=2,
+                temperature=0.7
+            )
+
+            answer = self.clean_text(answer_result[0]['generated_text'])
+
+            # Проверяем качество сгенерированной пары
+            if (len(question) > 10 and len(answer) > 15 and
+                    '?' in question and len(answer) > len(question)):
+
+                return {
+                    "question": question,
+                    "answer": answer,
+                    "context": context_clean[:200] + "..." if len(context_clean) > 200 else context_clean
+                }
+            else:
+                return None
+
         except Exception as e:
-            print(f"⚠️ Ошибка при генерации вопроса: {e}")
-            return f"Вопрос о '{answer_clean}'?"
+            print(f"⚠️ Ошибка при генерации QA пары: {e}")
+            return None
 
-    def answer_question(self, context: str, question: str) -> str:
-        if not context or len(context) < 30:
-            return context[:100]
+    def create_fallback_qa(self, context: str, idx: int) -> Dict:
+        """Создает резервную QA пару если модель не справляется"""
+        words = context.split()
+        key_terms = [word for word in words if len(word) > 4 and word.isalpha()]
 
-        try:
-            res = self.qa_pipeline(question=question, context=context[:800])
-            answer = res['answer'].strip()
-            return answer if answer and len(answer) > 2 else context[:100]
-        except Exception as e:
-            print(f"⚠️ Ошибка при поиске ответа: {e}")
-            return context[:100]
+        if key_terms:
+            term = random.choice(key_terms[:3])
+            question = f"Что означает термин '{term}' в этом контексте?"
+            answer = f"В данном контексте '{term}' относится к: {context[:150]}..."
+        else:
+            question = f"В чем основная идея этого утверждения?"
+            answer = f"Основная идея: {context[:200]}..."
 
-    def process_pdf(self, file_path: str, max_cards: int = 10) -> List[Dict]:
+        return {
+            "question": question,
+            "answer": answer,
+            "context": context[:150] + "..." if len(context) > 150 else context
+        }
+
+    def process_pdf(self, file_path: str, max_cards: int = 20) -> List[Dict]:
         print(f"\n🔄 Начинаю обработку {file_path}...")
+        print(f"🎯 Цель: {max_cards} карточек")
 
-        chunks = self.extract_text_chunks(file_path)
+        # Извлекаем текст
+        chunks = self.extract_meaningful_text(file_path)
 
         if not chunks:
-            print("❌ Чанки не найдены! PDF может быть отсканированным изображением.")
+            print("❌ Не найдено подходящих текстовых фрагментов!")
             return []
 
-        print(f"✅ Найдено {len(chunks)} чанков")
+        print(f"✅ Найдено {len(chunks)} содержательных фрагментов")
 
-        step = max(1, len(chunks) // max_cards)
-        selected_chunks = chunks[::step][:max_cards]
-
-        print(f"📌 Выбрано {len(selected_chunks)} чанков для обработки")
+        # Сортируем по длине (предпочтение средним по длине фрагментам)
+        chunks.sort(key=lambda x: abs(x['word_count'] - 25))  # Идеально 20-30 слов
 
         flashcards = []
-        for idx, chunk in enumerate(selected_chunks, 1):
-            context = chunk['text']
+        attempts = 0
+        max_attempts = max_cards * 2  # Ограничиваем попытки
 
-            # Извлекаем слова как потенциальный ответ
-            words = re.findall(r'\b[А-Яа-яA-Za-z]{3,}\b', context)
-            answer_highlight = words[0] if words else context[:30]
+        for chunk in chunks:
+            if len(flashcards) >= max_cards or attempts >= max_attempts:
+                break
 
-            question = self.generate_question(context, answer_highlight)
-            answer = self.answer_question(context, question)
+            attempts += 1
 
-            flashcard = {
-                "id": idx,
-                "question": question,
-                "answer": answer,
-                "context": context,
-                "source": f"Page {chunk['page']}"
-            }
-            flashcards.append(flashcard)
+            # Пробуем сгенерировать QA пару с помощью модели
+            qa_pair = self.generate_qa_pair(chunk['text'])
 
-            print(f"  [{idx}] Q: {question[:50]}... A: {answer[:50]}...")
+            if qa_pair:
+                flashcard = {
+                    "id": len(flashcards) + 1,
+                    "question": qa_pair["question"],
+                    "answer": qa_pair["answer"],
+                    "context": qa_pair["context"],
+                    "source": f"Page {chunk['page']}"
+                }
+                flashcards.append(flashcard)
+                print(f"  ✅ [{len(flashcards)}] Q: {qa_pair['question'][:70]}...")
+            else:
+                # Используем резервный метод для каждого 3-го чанка
+                if attempts % 3 == 0 and len(flashcards) < max_cards:
+                    fallback_qa = self.create_fallback_qa(chunk['text'], len(flashcards) + 1)
+                    flashcard = {
+                        "id": len(flashcards) + 1,
+                        "question": fallback_qa["question"],
+                        "answer": fallback_qa["answer"],
+                        "context": fallback_qa["context"],
+                        "source": f"Page {chunk['page']}"
+                    }
+                    flashcards.append(flashcard)
+                    print(f"  🔄 [{len(flashcards)}] Резервный: {fallback_qa['question'][:70]}...")
 
-        print(f"✅ Создано {len(flashcards)} карточек")
+        # Если карточек все еще мало, добавляем простые
+        if len(flashcards) < max_cards:
+            remaining = max_cards - len(flashcards)
+            print(f"🔄 Добавляю {remaining} простых карточек...")
+
+            for i in range(remaining):
+                if i < len(chunks):
+                    chunk = chunks[i]
+                    simple_qa = self.create_fallback_qa(chunk['text'], len(flashcards) + 1)
+                    flashcard = {
+                        "id": len(flashcards) + 1,
+                        "question": simple_qa["question"],
+                        "answer": simple_qa["answer"],
+                        "context": simple_qa["context"],
+                        "source": f"Page {chunk['page']}"
+                    }
+                    flashcards.append(flashcard)
+
+        print(f"✅ Создано {len(flashcards)} карточек из {attempts} попыток")
         return flashcards
