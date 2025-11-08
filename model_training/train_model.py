@@ -1,5 +1,3 @@
-# train_model.py (ИСПРАВЛЕННАЯ ВЕРСИЯ)
-
 from transformers import (
     T5ForConditionalGeneration,
     T5Tokenizer,
@@ -16,7 +14,7 @@ print(f"Используется устройство: {device}")
 
 # 1. Загрузка базовой модели
 print("Загрузка модели...")
-model_name = "cointegrated/rut5-base-multitask"  # Русская T5
+model_name = "cointegrated/rut5-base-multitask"
 tokenizer = T5Tokenizer.from_pretrained(model_name)
 model = T5ForConditionalGeneration.from_pretrained(model_name)
 
@@ -61,7 +59,7 @@ data_collator = DataCollatorForSeq2Seq(
 # 5. Настройки обучения (✅ ИСПРАВЛЕНО)
 training_args = TrainingArguments(
     output_dir="./fine_tuned_model",  # Где сохранить модель
-    eval_strategy="epoch",  # ✅ ИСПРАВЛЕНО: было evaluation_strategy
+    eval_strategy="epoch",
     learning_rate=3e-4,  # Скорость обучения
     per_device_train_batch_size=4,  # Размер батча
     per_device_eval_batch_size=4,
@@ -73,7 +71,7 @@ training_args = TrainingArguments(
     save_strategy="epoch",
     load_best_model_at_end=True,
     metric_for_best_model="eval_loss",
-    fp16=False,  # ✅ ИСПРАВЛЕНО: False для CPU
+    fp16=False,  # False для CPU
     report_to="none"  # Отключить wandb/tensorboard
 )
 
