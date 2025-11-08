@@ -56,9 +56,16 @@ def delete_pdf(db: Session, pdf_id: int, user_id: int):
         print(f"Error deleting PDF: {e}")
         return False
 
-def add_action(db: Session, action: str, filename: str, user_id: int):
+def add_action(db: Session, action: str, filename: str, user_id: int, details: str = None):
     try:
-        record = models.ActionHistory(action=action, filename=filename, user_id=user_id)
+        if details is None:
+            details = f"{action} file: {filename}"
+
+        record = models.ActionHistory(
+            action=action,
+            filename=filename,
+            user_id=user_id
+        )
         db.add(record)
         db.commit()
         return record

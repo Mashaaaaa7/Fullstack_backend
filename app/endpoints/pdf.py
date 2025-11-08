@@ -8,7 +8,10 @@ from app.auth import get_current_user
 from app.models import User, PDFFile
 from app.database import SessionLocal, get_db
 from app import crud
+from app.services.qa_generator import QAGenerator
+
 router = APIRouter()
+
 qa_generator = None
 
 def get_qa_generator():

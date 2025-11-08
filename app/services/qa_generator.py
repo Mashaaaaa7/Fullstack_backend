@@ -36,7 +36,7 @@ class QAGenerator:
 
     def generate_question(self, context: str, answer_highlight: str) -> str:
         input_text = f"generate question: {context[:300]} \\n highlight: {answer_highlight[:50]}"
-        result = self.qg_pipeline(input_text, max_length=64, num_beams=4)
+        result = self.qg_pipeline(input_text, max_new_tokens=64, num_beams=4)
         question = result[0]['generated_text'].strip()
         if not question.endswith("?"):
             question += "?"
