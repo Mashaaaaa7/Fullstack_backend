@@ -1,19 +1,17 @@
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.orm import Session
-import os
 import uuid
-import sys
-
 from app.auth import get_current_user
 from app.models import User, PDFFile
 from app.database import SessionLocal, get_db
 from app import crud
 from app.services.qa_generator import QAGenerator
+import os
+import sys
 
 router = APIRouter()
 
 qa_generator = None
-
 
 def get_qa_generator():
     global qa_generator
@@ -24,7 +22,7 @@ def get_qa_generator():
     return qa_generator
 
 
-@router.post("/upload-pdf")  # ← Без /api/pdf/
+@router.post("/upload-pdf")
 async def upload_pdf(
         file: UploadFile = File(...),
         user: User = Depends(get_current_user)
@@ -97,7 +95,7 @@ def process_pdf_background(file_id: int, file_path: str, filename: str, user_id:
         db.close()
 
 
-@router.post("/process-pdf/{file_id}")  # ← Без /api/pdf/
+@router.post("/process-pdf/{file_id}")
 async def process_pdf(
         file_id: int,
         max_cards: int = Query(10, ge=1, le=100),
@@ -135,7 +133,7 @@ async def process_pdf(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/cards/{file_id}")  # ← Без /api/pdf/
+@router.get("/cards/{file_id}")
 async def get_cards(
         file_id: int,
         user: User = Depends(get_current_user),
@@ -161,7 +159,8 @@ async def get_cards(
                     "question": card.question,
                     "answer": card.answer,
                     "context": card.context,
-                    "source": card.source
+                    "source": card.source,
+                    "created_at": card.created_at.isoformat() if card.created_at else None
                 }
                 for card in flashcards
             ],
