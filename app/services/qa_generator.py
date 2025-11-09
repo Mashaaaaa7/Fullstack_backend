@@ -1,14 +1,15 @@
-from transformers import pipeline
-import pdfplumber
 import re
 import unicodedata
 from typing import List, Dict
+from transformers import pipeline
+import pdfplumber
 import torch
 
-
 class QAGenerator:
-    def __init__(self):
+    def __init__(self, use_gpt: bool = False, model_name: str = "cointegrated/rut5-base-multitask"):
+        # Device
         self.device = 0 if torch.cuda.is_available() else -1
+        self.use_gpt = use_gpt
         print("⏳ Загружаю русскую модель...")
         self.generator = pipeline(
             "text2text-generation",
@@ -95,109 +96,150 @@ class QAGenerator:
 
         return chunks
 
-    def _extract_key_phrase(self, text: str) -> str:
-        """Извлекает главное существительное из текста"""
-        words = text.split()
+    def _clean_question(self, text: str) -> str:
+        """Очищает вопрос от мусора"""
+        # Удаляем промпты в начале
+        text = re.sub(r'^напишите вопрос.*?:\s*', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'^вопрос.*?:\s*', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'^на основе.*?:\s*', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'^создайте.*?:\s*', '', text, flags=re.IGNORECASE)
 
-        # Стоп-слова и прилагательные
-        bad_words = {
-            'это', 'для', 'при', 'как', 'что', 'в', 'по', 'на', 'с', 'и', 'или', 'то',
-            'был', 'была', 'были', 'быть', 'являются', 'является', 'есть',
-            'если', 'здесь', 'наконец', 'однако', 'рассматривая', 'выделение',
-            'предисловие', 'обучение', 'набор'
-        }
+        # Убираем мусор в конце
+        text = text.rstrip('.,;:')
+
+        # Капитализируем
+        if text:
+            text = text[0].upper() + text[1:].lower()
+
+        # Добавляем ?
+        if text and not text.endswith('?'):
+            text += '?'
+
+        return text.strip()
+
+    def _generate_question_rut5(self, answer: str) -> str:
+        """Генерирует вопрос через RuT5"""
+        try:
+            text_sample = answer[:250]
+
+            # ЛУЧШИЙ ПРОМПТ
+            prompt = f"Создайте вопрос к тексту: {text_sample}"
+
+            result = self.generator(
+                prompt,
+                max_new_tokens=40,
+                num_beams=3,
+                temperature=0.6
+            )
+
+            question = self.clean_text(result[0]['generated_text']).strip()
+            question = self._clean_question(question)
+
+            # Проверяем качество
+            if (15 < len(question) < 120 and '?' in question and
+                    not question.lower().startswith('напишите') and
+                    not question.lower().startswith('создайте')):
+                return question
+
+            return None
+        except Exception as e:
+            print(f"⚠️ RuT5 ошибка: {e}")
+            return None
+
+    def _generate_universal_question(self, answer: str) -> str:
+        """Fallback: шаблоны вопросов"""
+        words = answer.split()
+        answer_lower = answer.lower()
+
+        bad_words = {'это', 'для', 'при', 'как', 'что', 'в', 'по', 'на', 'с', 'и', 'или', 'то',
+                     'был', 'была', 'были', 'быть', 'являются', 'является', 'есть', 'имели',
+                     'имеют', 'находится', 'находились', 'важный', 'важная', 'главный', 'новый'}
 
         idx = 0
         while idx < len(words) and words[idx].lower() in bad_words:
             idx += 1
 
-        working_words = words[idx:]
+        remaining_words = words[idx:]
 
-        # Ищем существительное (слово с заглавной буквы, длина > 5)
-        for w in working_words[:10]:
+        for w in remaining_words[:12]:
             w_lower = w.lower().rstrip(',:;.')
-            if len(w_lower) > 5 and w[0].isupper() and w_lower not in bad_words:
-                return w_lower
+            if (len(w_lower) > 4 and w[0].isupper() and w_lower not in bad_words and
+                    not w_lower.endswith('ом') and not w_lower.endswith('ый') and
+                    not w_lower.endswith('ой')):
+                key_phrase = w_lower
+                break
+        else:
+            key_phrase = "процесс"
 
-        # Fallback
-        return "концепция"
-
-    def _generate_question(self, text: str) -> str:
-        """Генерирует УМНЫЙ вопрос на основе анализа текста"""
-        text_lower = text.lower()
-        key_phrase = self._extract_key_phrase(text)
-
-        # Анализируем содержание и генерируем подходящий вопрос
-
-        if any(word in text_lower for word in ['представить', 'вводит', 'рассмотрены']):
-            return f"Что представляет собой {key_phrase}?"
-
-        elif any(word in text_lower for word in ['обучения', 'алгоритм', 'методы', 'подход']):
-            return f"Как работает {key_phrase}?"
-
-        elif any(word in text_lower for word in ['применени', 'использова', 'применяет']):
-            return f"Где применяется {key_phrase}?"
-
-        elif any(word in text_lower for word in ['рассмотр', 'обсужда', 'анализир']):
-            return f"Какие особенности имеет {key_phrase}?"
-
-        elif any(word in text_lower for word in ['содержит', 'включает', 'состоит']):
+        if any(word in answer_lower for word in ['оказала', 'привел', 'вызва']):
+            return f"Какое воздействие имел {key_phrase}?"
+        elif any(word in answer_lower for word in ['развив', 'эволюц', 'преобразов']):
+            return f"Как происходило развитие {key_phrase}?"
+        elif any(word in answer_lower for word in ['привела', 'послужила', 'способствова']):
+            return f"Какие факторы способствовали {key_phrase}?"
+        elif any(word in answer_lower for word in ['играла', 'выполня', 'служила']):
+            return f"Какую роль выполнял {key_phrase}?"
+        elif any(word in answer_lower for word in ['содержит', 'включает']):
             return f"Из чего состоит {key_phrase}?"
-
-        elif any(word in text_lower for word in ['может', 'помогает', 'способствует']):
-            return f"Какая функция у {key_phrase}?"
-
-        elif any(word in text_lower for word in ['данные', 'информация', 'результаты']):
-            return f"Как интерпретировать {key_phrase}?"
-
-        elif any(word in text_lower for word in ['процесс', 'этапы', 'шаги']):
-            return f"Какие этапы содержит процесс {key_phrase}?"
-
         else:
             return f"Объясните, что такое {key_phrase}?"
 
+    def _is_corrupted_text(self, text: str) -> bool:
+        """Проверяет, не повреждён ли текст"""
+        # Проверяем на мусор
+        if any(pattern in text for pattern in [
+            'znp', 'Zogitp', 'modelnp', 'znà', 'sà', 'ру=о', 'nоrистической'
+        ]):
+            return True
+
+        # Проверяем на слишком много символов = или ?
+        if text.count('=') > 2 or text.count('?') > 1:
+            return True
+
+        # Проверяем на кириллицу + латиницу в одном слове
+        if re.search(r'[а-яА-Я][a-zA-Z]|[a-zA-Z][а-яА-Я]', text):
+            return True
+
+        return False
+
     def generate_qa_pair(self, context: str) -> Dict:
-        """Генерирует качественную QA пару"""
+        """Генерирует QA с фильтрацией мусора"""
         try:
             context_clean = self.clean_text(context[:700])
-            context_clean = re.sub(r'\b\d{1,3}\b', '', context_clean)
             context_clean = re.sub(r'\s+', ' ', context_clean).strip()
 
-            if len(context_clean) < 100:
+            if len(context_clean) < 120:
+                return None
+
+            # Проверяем на повреждённый текст ИЗ PDF
+            if self._is_corrupted_text(context_clean):
                 return None
 
             if any(word in context_clean.lower() for word in
                    ['код', 'import', 'def ', 'print(', 'function', 'class ']):
                 return None
 
-            # Выбираем лучшие предложения
             sentences = [s.strip() for s in re.split(r'[.!?]+', context_clean)]
-            candidate_sents = [s for s in sentences if len(s.split()) >= 12 and len(s) > 90]
+            candidate_sents = [s for s in sentences if len(s.split()) >= 12 and len(s) > 100]
 
             if not candidate_sents:
                 return None
 
-            # Пропускаем вводные фразы
-            answer = None
-            for sent in candidate_sents:
-                if not any(marker in sent.lower() for marker in
-                           ['номер', 'тема', 'раздел', 'глава', 'таблица', 'рисунок']):
-                    answer = sent
-                    break
+            answer = candidate_sents[0]
 
-            if not answer:
-                answer = candidate_sents[0]
+            question = self._generate_question_rut5(answer)
 
-            # Генерируем вопрос
-            question = self._generate_question(answer)
+            # Fallback
+            if not question:
+                question = self._generate_universal_question(answer)
+
+            if not question:
+                return None
 
             answer = re.sub(r'\s+', ' ', answer).strip()
             question = re.sub(r'\s+', ' ', question).strip()
 
-            # Проверяем качество
-            if (len(question) > 12 and len(answer) > 90 and
-                    '?' in question and
-                    len(question) < 120):
+            if len(question) > 15 and len(answer) > 100:
                 return {
                     "question": question,
                     "answer": answer,
@@ -207,7 +249,7 @@ class QAGenerator:
             return None
 
         except Exception as e:
-            print(f"⚠️ Ошибка генерации: {e}")
+            print(f"⚠️ Ошибка: {e}")
             return None
 
     def process_pdf(self, file_path: str, max_cards: int = 10) -> List[Dict]:
