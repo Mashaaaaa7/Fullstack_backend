@@ -13,8 +13,8 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
-    # Связи
     pdf_files = relationship("PDFFile", back_populates="user", cascade="all, delete-orphan")
+    flashcards = relationship("Flashcard", back_populates="user", cascade="all, delete-orphan")
     action_history = relationship("ActionHistory", back_populates="user", cascade="all, delete-orphan")
 
 
@@ -28,15 +28,32 @@ class PDFFile(Base):
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     user = relationship("User", back_populates="pdf_files")
+    flashcards = relationship("Flashcard", back_populates="pdf_file", cascade="all, delete-orphan")
+
+class Flashcard(Base):
+    __tablename__ = "flashcards"
+
+    id = Column(Integer, primary_key=True, index=True)
+    pdf_file_id = Column(Integer, ForeignKey('pdf_files.id', ondelete='CASCADE'), nullable=False)
+    user_id = Column(Integer, ForeignKey('users.user_id', ondelete='CASCADE'), nullable=False)
+    question = Column(Text, nullable=False)
+    answer = Column(Text, nullable=False)
+    context = Column(Text, nullable=True)
+    source = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    pdf_file = relationship("PDFFile", back_populates="flashcards")
+    user = relationship("User", back_populates="flashcards")
+
 
 class ActionHistory(Base):
     __tablename__ = "action_history"
 
     id = Column(Integer, primary_key=True)
-    action = Column(String(100), nullable=False)  # 'upload', 'download', 'delete'
-    filename = Column(String(255), nullable=False)
+    action = Column(String(100), nullable=False)
+    filename = Column(String(255), nullable=True)
+    details = Column(Text, nullable=True)
     user_id = Column(Integer, ForeignKey('users.user_id', ondelete='CASCADE'), nullable=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
-    # Связь с User
     user = relationship("User", back_populates="action_history")

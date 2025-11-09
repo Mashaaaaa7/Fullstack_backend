@@ -10,7 +10,6 @@ from app.database import SessionLocal, get_db
 from app import crud
 from app.services.qa_generator import QAGenerator
 
-# ⭐ ВАЖНО: определяем router в начале файла!
 router = APIRouter()
 
 qa_generator = None
@@ -25,7 +24,7 @@ def get_qa_generator():
     return qa_generator
 
 
-@router.post("/upload-pdf")
+@router.post("/upload-pdf")  # ← Без /api/pdf/
 async def upload_pdf(
         file: UploadFile = File(...),
         user: User = Depends(get_current_user)
@@ -76,11 +75,13 @@ async def upload_pdf(
 
 
 def process_pdf_background(file_id: int, file_path: str, filename: str, user_id: int, max_cards: int):
-    """Генерирует карточки в фоне"""
+    """Генерирует и сохраняет карточки в фоне"""
     db = SessionLocal()
     try:
         qa_gen = get_qa_generator()
         flashcards = qa_gen.process_pdf(file_path, max_cards)
+
+        crud.save_flashcards(db, file_id, user_id, flashcards)
 
         crud.add_action(
             db=db,
@@ -89,14 +90,14 @@ def process_pdf_background(file_id: int, file_path: str, filename: str, user_id:
             details=f"Created {len(flashcards)} flashcards",
             user_id=user_id
         )
-        print(f"✅ Карточки для {filename} готовы! Создано: {len(flashcards)}")
+        print(f"✅ Карточки для {filename} сохранены в БД! Создано: {len(flashcards)}")
     except Exception as e:
         print(f"❌ Ошибка при обработке {filename}: {e}")
     finally:
         db.close()
 
 
-@router.post("/process-pdf/{file_id}")
+@router.post("/process-pdf/{file_id}")  # ← Без /api/pdf/
 async def process_pdf(
         file_id: int,
         max_cards: int = Query(10, ge=1, le=100),
@@ -134,10 +135,9 @@ async def process_pdf(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/cards/{file_id}")
+@router.get("/cards/{file_id}")  # ← Без /api/pdf/
 async def get_cards(
         file_id: int,
-        max_cards: int = Query(10, ge=1, le=100),
         user: User = Depends(get_current_user),
         db: Session = Depends(get_db)
 ):
@@ -150,20 +150,56 @@ async def get_cards(
         if not pdf_file:
             raise HTTPException(status_code=404, detail="PDF not found")
 
-        qa_gen = get_qa_generator()
-        flashcards = qa_gen.process_pdf(pdf_file.file_path, max_cards)
+        flashcards = crud.get_flashcards_by_pdf(db, file_id, user.user_id)
 
         return {
             "success": True,
             "file_name": pdf_file.file_name,
-            "cards": flashcards,
+            "cards": [
+                {
+                    "id": card.id,
+                    "question": card.question,
+                    "answer": card.answer,
+                    "context": card.context,
+                    "source": card.source
+                }
+                for card in flashcards
+            ],
             "total": len(flashcards)
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/history")
+@router.get("/user-cards")  # ← Без /api/pdf/
+async def get_user_cards(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Получить все карточки пользователя"""
+    try:
+        flashcards = crud.get_user_flashcards(db, user.user_id)
+
+        return {
+            "success": True,
+            "total": len(flashcards),
+            "cards": [
+                {
+                    "id": card.id,
+                    "pdf_file_id": card.pdf_file_id,
+                    "question": card.question,
+                    "answer": card.answer,
+                    "source": card.source,
+                    "created_at": card.created_at.isoformat()
+                }
+                for card in flashcards
+            ]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/history")  # ← Без /api/pdf/
 async def get_history(
         user: User = Depends(get_current_user),
         db: Session = Depends(get_db)
@@ -189,7 +225,7 @@ async def get_history(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/delete-file/{file_id}")
+@router.delete("/delete-file/{file_id}")  # ← Без /api/pdf/
 async def delete_pdf(
         file_id: int,
         user: User = Depends(get_current_user),
@@ -204,8 +240,14 @@ async def delete_pdf(
         if not pdf_file:
             raise HTTPException(status_code=404, detail="PDF not found")
 
+        crud.delete_flashcards_by_pdf(db, file_id)
+
         if os.path.exists(pdf_file.file_path):
             os.remove(pdf_file.file_path)
+
+        json_path = pdf_file.file_path.replace('.pdf', '_cards.json')
+        if os.path.exists(json_path):
+            os.remove(json_path)
 
         db.delete(pdf_file)
         db.commit()
@@ -220,7 +262,7 @@ async def delete_pdf(
 
         return {
             "success": True,
-            "message": f"File {pdf_file.file_name} deleted"
+            "message": f"File {pdf_file.file_name} and all cards deleted"
         }
     except Exception as e:
         db.rollback()

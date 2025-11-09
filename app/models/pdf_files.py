@@ -20,13 +20,12 @@ class PDFFile(Base):
 class ActionHistory(Base):
     __tablename__ = "action_history"
 
-    id = Column(Integer, primary_key=True, index=True)
-    action = Column(String, nullable=False)
-    deck_name = Column(String, nullable=True)
-    filename = Column(String, nullable=True)
-    details = Column(Text, nullable=False)
-    timestamp = Column(DateTime, default=datetime.utcnow)
-    user_id = Column(Integer, ForeignKey("user.user_id"))
+    id = Column(Integer, primary_key=True)
+    action = Column(String(100), nullable=False)
+    filename = Column(String(255), nullable=False)
+    details = Column(Text, nullable=True)  # ← ДОБАВЬ ЭТУ СТРОКУ
+    user_id = Column(Integer, ForeignKey('users.user_id', ondelete='CASCADE'), nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     user = relationship("User", back_populates="action_history")
 
