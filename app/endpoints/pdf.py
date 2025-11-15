@@ -286,10 +286,12 @@ async def list_user_pdfs(
         user: User = Depends(get_current_user),
         db: Session = Depends(get_db)
 ):
-    """Получает список всех PDF пользователя"""
+    """Получает активные PDF """
     try:
+        # файлы где is_deleted = False
         pdf_files = db.query(PDFFile).filter(
-            PDFFile.user_id == user.user_id
+            PDFFile.user_id == user.user_id,
+            PDFFile.is_deleted == False
         ).all()
 
         return {
@@ -298,8 +300,7 @@ async def list_user_pdfs(
                 {
                     "id": pdf.id,
                     "name": pdf.file_name,
-                    "file_size": os.path.getsize(pdf.file_path) if os.path.exists(pdf.file_path) else 0,
-                    "created_at": pdf.created_at.isoformat() if pdf.created_at else None
+                    "file_size": os.path.getsize(pdf.file_path) if os.path.exists(pdf.file_path) else 0
                 }
                 for pdf in pdf_files
             ],
@@ -349,47 +350,30 @@ async def delete_pdf(
         user: User = Depends(get_current_user),
         db: Session = Depends(get_db)
 ):
-    """Удаляет PDF и все связанные карточки"""
+    """✅ МЯГКОЕ удаление - помечает как удалённый, БД не трогаем"""
     try:
         pdf_file = db.query(PDFFile).filter(
             PDFFile.id == file_id,
-            PDFFile.user_id == user.user_id
+            PDFFile.user_id == user.user_id,
+            PDFFile.is_deleted == False
         ).first()
 
         if not pdf_file:
             raise HTTPException(status_code=404, detail="PDF not found")
 
-        # Удаляем карточки из БД
-        crud.delete_flashcards_by_pdf(db, file_id)
-
-        # Удаляем файл с диска
-        if os.path.exists(pdf_file.file_path):
-            os.remove(pdf_file.file_path)
-
-        # Удаляем кеш файл если есть
-        json_path = pdf_file.file_path.replace('.pdf', '_cards.json')
-        if os.path.exists(json_path):
-            os.remove(json_path)
-
-        # Удаляем запись из БД
-        db.delete(pdf_file)
+        # ✅ Помечаем как удалённый (НЕ удаляем из БД!)
+        pdf_file.is_deleted = True
         db.commit()
 
-        # Логируем действие
-        crud.add_action(
-            db=db,
-            action="delete",
-            filename=pdf_file.file_name,
-            details=f"Deleted file {pdf_file.file_name}",
-            user_id=user.user_id
-        )
+        print(f"🗑️ File {pdf_file.file_name} marked as deleted (is_deleted=True)")
 
         return {
             "success": True,
-            "message": f"File {pdf_file.file_name} and all cards deleted"
+            "message": f"File {pdf_file.file_name} deleted"
         }
     except HTTPException:
         raise
     except Exception as e:
         db.rollback()
+        print(f"❌ ERROR in delete_pdf: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
