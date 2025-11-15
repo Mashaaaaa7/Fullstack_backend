@@ -1,64 +1,65 @@
 from sqlalchemy.orm import Session
-from . import models, schemas
+from app import models
+import json
 
-def get_user_by_email(db: Session, email: str):
-    return db.query(models.User).filter(models.User.email == email).first()
-
-def create_user(db: Session, user: schemas.UserCreate, hashed_password: str):
+def save_flashcards(db: Session, pdf_file_id: int, user_id: int, flashcards: list):
+    """Сохраняет карточки в БД и JSON"""
     try:
-        db_user = models.User(email=user.email, hashed_password=hashed_password)
-        db.add(db_user)
+        # Сохраняем в БД
+        for card in flashcards:
+            flashcard = models.Flashcard(
+                pdf_file_id=pdf_file_id,
+                user_id=user_id,
+                question=card['question'],
+                answer=card['answer'],
+                context=card.get('context', ''),
+                source=card.get('source', '')
+            )
+            db.add(flashcard)
+
         db.commit()
-        db.refresh(db_user)
-        return db_user
+
+        # Сохраняем в JSON файл
+        pdf_file = db.query(models.PDFFile).filter(models.PDFFile.id == pdf_file_id).first()
+        if pdf_file:
+            json_path = pdf_file.file_path.replace('.pdf', '_cards.json')
+            with open(json_path, 'w', encoding='utf-8') as f:
+                json.dump(flashcards, f, ensure_ascii=False, indent=2)
+
+        return True
     except Exception as e:
         db.rollback()
-        print(f"Error creating user: {e}")
+        print(f"Error saving flashcards: {e}")
         raise
 
-def add_pdf(db: Session, file_name: str, file_path: str, user_id: int):
+
+def get_flashcards_by_pdf(db: Session, pdf_file_id: int, user_id: int):
+    """Получает карточки по PDF файлу"""
+    return db.query(models.Flashcard).filter(
+        models.Flashcard.pdf_file_id == pdf_file_id,
+        models.Flashcard.user_id == user_id
+    ).all()
+
+def delete_flashcards_by_pdf(db: Session, pdf_file_id: int):
+    """Удаляет карточки по PDF файлу"""
+    db.query(models.Flashcard).filter(
+        models.Flashcard.pdf_file_id == pdf_file_id
+    ).delete()
+    db.commit()
+
+
+def add_action(db: Session, action: str, filename: str, user_id: int, details: str = None):
+    """Добавляет действие в историю"""
     try:
-        db_file = models.PDFFile(
-            file_name=file_name,
-            file_path=file_path,
+        if details is None:
+            details = f"{action} file: {filename}"
+
+        record = models.ActionHistory(
+            action=action,
+            filename=filename,
+            details=details,
             user_id=user_id
         )
-        db.add(db_file)
-        db.commit()
-        db.refresh(db_file)
-        return db_file
-    except Exception as e:
-        db.rollback()
-        print(f"Error adding PDF: {e}")
-        raise
-
-
-def get_pdfs_by_user(db: Session, user_id: int):
-    try:
-        return db.query(models.PDFFile).filter(models.PDFFile.user_id == user_id).all()
-    except Exception as e:
-        print(f"Error getting PDFs: {e}")
-        return []
-
-def delete_pdf(db: Session, pdf_id: int, user_id: int):
-    try:
-        file = db.query(models.PDFFile).filter(
-            models.PDFFile.id == pdf_id,
-            models.PDFFile.user_id == user_id
-        ).first()
-        if file:
-            db.delete(file)
-            db.commit()
-            return True
-        return False
-    except Exception as e:
-        db.rollback()
-        print(f"Error deleting PDF: {e}")
-        return False
-
-def add_action(db: Session, action: str, filename: str, user_id: int):
-    try:
-        record = models.ActionHistory(action=action, filename=filename, user_id=user_id)
         db.add(record)
         db.commit()
         return record
@@ -68,10 +69,8 @@ def add_action(db: Session, action: str, filename: str, user_id: int):
         raise
 
 def get_history(db: Session, user_id: int):
-    try:
-        return db.query(models.ActionHistory).filter(
-            models.ActionHistory.user_id == user_id
-        ).all()
-    except Exception as e:
-        print(f"Error getting history: {e}")
-        return []
+    """Получает историю действий пользователя"""
+    return db.query(models.ActionHistory)\
+        .filter(models.ActionHistory.user_id == user_id)\
+        .order_by(models.ActionHistory.id.asc())\
+        .all()
