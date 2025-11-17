@@ -1,26 +1,32 @@
 import re
 import unicodedata
-from typing import List, Dict
-from transformers import pipeline
+from typing import List, Dict, Optional, Tuple
 import pdfplumber
 import torch
+from sqlalchemy.orm import Session
+from app import models
 
 
 class QAGenerator:
-    def __init__(self, use_gpt: bool = False, model_name: str = "cointegrated/rut5-base-multitask"):
+    """
+    НОВАЯ архитектура QAGenerator v4.0
+
+    ✅ РЕВОЛЮЦИОННЫЙ подход:
+    Вместо 10 шаблонов - РЕАЛЬНО парсим текст
+    Извлекаем:
+    - Подлежащее (кто)
+    - Глагол/предикат (что делал)
+    - Дополнение (кого/что)
+
+    Результат: РАЗНЫЕ вопросы для РАЗНЫХ предложений!
+    """
+
+    def __init__(self, use_gpt: bool = False):
         self.device = 0 if torch.cuda.is_available() else -1
-        self.use_gpt = use_gpt
-        print("⏳ Загружаю русскую модель...")
-        self.generator = pipeline(
-            "text2text-generation",
-            model="cointegrated/rut5-base-multitask",
-            device=self.device,
-            torch_dtype=torch.float32
-        )
-        print("✅ Модель загружена!")
+        print("✅ QAGenerator v4.0 инициализирован!", flush=True)
 
     def clean_text(self, text: str) -> str:
-        """Очищает текст от артефактов"""
+        """Очищает текст"""
         if not text:
             return ""
         text = ''.join(ch for ch in text if unicodedata.category(ch)[0] != 'C' or ch in '\n\t')
@@ -28,301 +34,333 @@ class QAGenerator:
         text = re.sub(r'\s+', ' ', text).strip()
         return text
 
+    def _clean_paragraph(self, text: str) -> str:
+        """Очищает абзац"""
+        text = re.sub(r'\*\*', '', text)
+        text = re.sub(r'^\s*[\*\-\•]\s*', '', text)
+        text = re.sub(r'^\s*\d+[\.\s]\s*', '', text)
+        text = re.sub(r'^\s*[;:]\s*', '', text)
+        text = self.clean_text(text)
+        return text
+
     def extract_meaningful_text(self, file_path: str) -> List[Dict]:
-        """Извлекает осмысленные фрагменты"""
+        """Извлекает абзацы из PDF"""
         chunks = []
+
         try:
             with pdfplumber.open(file_path) as pdf:
-                print(f"📄 PDF имеет {len(pdf.pages)} страниц")
+                print(f"📄 PDF имеет {len(pdf.pages)} страниц", flush=True)
 
-                for i, page in enumerate(pdf.pages):
+                for page_num, page in enumerate(pdf.pages):
                     raw_text = page.extract_text()
                     if not raw_text:
                         continue
 
-                    text = self.clean_text(raw_text)
-                    if len(text) < 100:
-                        continue
-
-                    text = re.sub(r'^\d{2}\.\d{2}\.\d{4}.*?Colab\s*', '', text)
-                    text = re.sub(r'https?://[^\s]+', '', text)
-                    text = re.sub(r'\d{4}.*?ipynb.*?Colab', '', text, flags=re.IGNORECASE)
-
-                    paragraphs = [p.strip() for p in text.split('\n') if len(p.strip()) > 50]
+                    paragraphs = raw_text.split('\n\n')
 
                     for para in paragraphs:
-                        chunks_from_para = self._split_into_chunks(para)
-                        chunks.extend(chunks_from_para)
+                        cleaned = self._clean_paragraph(para)
 
-            chunks = [c for c in chunks if not any(
-                bad in c['text'].lower() for bad in ['ipynb', 'colab', 'http', '©', '®']
-            )]
+                        if len(cleaned) < 50:
+                            continue
 
-            print(f"📊 Найдено {len(chunks)} содержательных фрагментов")
+                        if any(bad in cleaned.lower()
+                               for bad in ['ipynb', 'colab', 'http', '©', '®']):
+                            continue
+
+                        chunks.append({
+                            "text": cleaned,
+                            "page": page_num,
+                            "word_count": len(cleaned.split())
+                        })
+
+            print(f"📊 Найдено {len(chunks)} абзацев", flush=True)
             return chunks
         except Exception as e:
-            print(f"❌ Ошибка: {e}")
+            print(f"❌ Ошибка: {e}", flush=True)
             return []
 
-    def _split_into_chunks(self, text: str) -> List[Dict]:
-        """Разбивает текст на смысловые куски"""
-        chunks = []
-        sentences = re.split(r'[.!?]+\s+', text)
+    def _split_into_sentences(self, text: str) -> List[str]:
+        """Разбиение на предложения"""
+        text = text.replace('Др.', 'Др_').replace('др.', 'др_').replace('т.е.', 'т_е')
+        sentences = re.split(r'([.!?]+)\s+(?=[А-ЯёЁ])', text)
 
-        combined = []
-        current = ""
+        result = []
+        for i in range(0, len(sentences) - 1, 2):
+            if i + 1 < len(sentences):
+                sentence = sentences[i] + sentences[i + 1]
+                sentence = sentence.replace('Др_', 'Др.').replace('др_', 'др.').replace('т_е', 'т.е')
+                sentence = sentence.strip()
+                if len(sentence) > 15:
+                    result.append(sentence)
 
-        for sent in sentences:
-            sent = sent.strip()
-            if not sent or len(sent) < 5:
-                continue
+        if sentences and len(sentences[-1]) > 15:
+            last = sentences[-1].replace('Др_', 'Др.').replace('др_', 'др.').replace('т_е', 'т.е').strip()
+            if last and not last.endswith(('.', '!', '?')):
+                last += '.'
+            if len(last) > 15:
+                result.append(last)
 
-            current += sent + ". "
+        return result
 
-            if len(current.split()) >= 12:
-                combined.append(current.strip())
-                current = ""
+    def _extract_parts(self, sentence: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+        """
+        ✅ НОВОЕ: извлекает части предложения:
+        - subject (подлежащее)
+        - verb (глагол/предикат)
+        - obj (дополнение)
 
-        if current.strip():
-            combined.append(current.strip())
+        Примеры:
+        "Нацисты стремились к территориальной экспансии"
+        → subject="Нацисты", verb="стремились", obj="территориальной экспансии"
 
-        for chunk_text in combined:
-            if len(chunk_text) > 60:
-                chunks.append({
-                    "text": chunk_text,
-                    "page": 0,
-                    "word_count": len(chunk_text.split())
-                })
+        "СССР поддерживал республиканское правительство Испании"
+        → subject="СССР", verb="поддерживал", obj="республиканское правительство Испании"
+        """
+        sent = sentence.rstrip('.!?')
+        sent_lower = sent.lower()
+        words = sent.split()
 
-        return chunks
+        subject = None
+        verb = None
+        obj = None
 
-    def _clean_question(self, text: str) -> str:
-        """Очищает вопрос от мусора"""
-        text = re.sub(r'^напишите вопрос.*?:\s*', '', text, flags=re.IGNORECASE)
-        text = re.sub(r'^вопрос.*?:\s*', '', text, flags=re.IGNORECASE)
-        text = re.sub(r'^на основе.*?:\s*', '', text, flags=re.IGNORECASE)
-        text = re.sub(r'^создайте.*?:\s*', '', text, flags=re.IGNORECASE)
+        # Ищем глагол
+        verbs = [
+            'привел', 'привела', 'привело', 'привели',
+            'стремился', 'стремилась', 'стремились',
+            'поддержива', 'поддерж', 'помог',
+            'начал', 'началась', 'началось', 'началось',
+            'вызвал', 'вызвала', 'вызвало', 'вызвали',
+            'выдвинул', 'выдвинула',
+            'создал', 'создала', 'создало', 'создали',
+            'демонстрирова',
+            'стал', 'стала', 'стало',
+            'показыва', 'показал',
+            'играл', 'играла', 'играло',
+            'боролся', 'боролась',
+            'участвовал', 'участвовала',
+            'провел', 'провела', 'проводи',
+            'предпринял', 'предприняла',
+            'совершил', 'совершила'
+        ]
 
-        text = text.rstrip('.,;:')
-
-        if text:
-            text = text[0].upper() + text[1:].lower()
-
-        if text and not text.endswith('?'):
-            text += '?'
-
-        return text.strip()
-
-    def _generate_question_rut5(self, answer: str) -> str:
-        """Генерирует вопрос через RuT5"""
-        try:
-            text_sample = answer[:250]
-            prompt = f"Создайте вопрос к тексту: {text_sample}"
-
-            result = self.generator(
-                prompt,
-                max_new_tokens=40,
-                num_beams=3,
-                temperature=0.6
-            )
-
-            question = self.clean_text(result[0]['generated_text']).strip()
-            question = self._clean_question(question)
-
-            if (15 < len(question) < 120 and '?' in question and
-                    not question.lower().startswith('напишите') and
-                    not question.lower().startswith('создайте')):
-                return question
-
-            return None
-        except Exception as e:
-            print(f"⚠️ RuT5 ошибка: {e}")
-            return None
-
-    def _generate_universal_question(self, answer: str) -> str:
-        """Улучшенный fallback"""
-        words = answer.split()
-        answer_lower = answer.lower()
-
-        bad_words = {
-            'это', 'для', 'при', 'как', 'что', 'в', 'по', 'на', 'с', 'и', 'или', 'то',
-            'был', 'была', 'были', 'быть', 'являются', 'является', 'есть', 'имели',
-            'имеют', 'находится', 'находились', 'важный', 'важная', 'главный', 'новый',
-            'процесс', 'великого', 'например', 'несмотря', 'главные', 'местное',
-            'влияние', 'административное', 'уезды', 'екатерины', 'система', 'реформа'
-        }
-
-        idx = 0
-        while idx < len(words) and words[idx].lower() in bad_words:
-            idx += 1
-
-        remaining_words = words[idx:]
-
-        key_phrase = None
-        for w in remaining_words[:15]:
-            w_lower = w.lower().rstrip(',:;.')
-            if (len(w_lower) > 5 and w[0].isupper() and w_lower not in bad_words):
-                key_phrase = w_lower
+        verb_idx = -1
+        for i, word in enumerate(words):
+            w_lower = word.lower()
+            if any(v in w_lower for v in verbs):
+                verb = word.rstrip('.,;:')
+                verb_idx = i
                 break
 
-        if not key_phrase:
-            return None
+        if verb_idx >= 0:
+            # Подлежащее - обычно первое существительное перед глаголом
+            skip = {'в', 'на', 'по', 'из', 'к', 'при', 'от', 'под', 'над', 'с', 'о', 'об', 'и', 'или', 'но'}
+            for i in range(verb_idx):
+                w = words[i].lower()
+                if w not in skip and len(w) > 2:
+                    subject = words[i].rstrip('.,;:')
+                    break
 
-        if any(word in answer_lower for word in ['оказала', 'привел', 'вызва']):
-            return f"Какое воздействие имел {key_phrase}?"
-        elif any(word in answer_lower for word in ['развив', 'эволюц', 'преобразов']):
-            return f"Как происходило развитие {key_phrase}?"
-        elif any(word in answer_lower for word in ['привела', 'послужила', 'способствова']):
-            return f"Какие факторы способствовали {key_phrase}?"
-        elif any(word in answer_lower for word in ['играла', 'выполня', 'служила', 'роль']):
-            return f"Какую роль выполнял {key_phrase}?"
-        elif any(word in answer_lower for word in ['содержит', 'включает']):
-            return f"Из чего состоит {key_phrase}?"
-        elif any(word in answer_lower for word in ['представляет', 'явлением']):
-            return f"Что такое {key_phrase}?"
-        elif any(word in answer_lower for word in ['ввел', 'введен', 'подписать']):
-            return f"Что сделал {key_phrase}?"
+            # Дополнение - всё после глагола до точки
+            if verb_idx + 1 < len(words):
+                obj_words = []
+                for i in range(verb_idx + 1, len(words)):
+                    obj_words.append(words[i].rstrip('.,;:'))
+                if obj_words:
+                    obj = ' '.join(obj_words)
+
+        return subject, verb, obj
+
+    def _generate_question_from_parts(self, subject: str, verb: str, obj: str, sentence: str) -> Optional[str]:
+        """
+        ✅ НОВОЕ: генерирует КОНКРЕТНЫЙ вопрос на основе частей
+        """
+        verb_lower = verb.lower() if verb else ""
+
+        # Правило 1: глагол "привел/привела" → "К чему привел X?"
+        if 'привел' in verb_lower:
+            if subject:
+                return f"К чему привел {subject}?"
+            return "К чему это привело?"
+
+        # Правило 2: глагол "стремился" → "К чему стремился X?"
+        if 'стремил' in verb_lower:
+            if subject:
+                return f"К чему стремился {subject}?"
+            if obj:
+                return f"К чему стремились?"
+            return "К чему стремились?"
+
+        # Правило 3: глагол "поддерживал" → "Кого поддерживал X?"
+        if 'поддерж' in verb_lower or 'помог' in verb_lower:
+            if subject:
+                return f"Кого поддерживал {subject}?"
+            return "Кого поддерживали?"
+
+        # Правило 4: глагол "вызвал" → "Что вызвал X?"
+        if 'вызва' in verb_lower:
+            if obj:
+                return f"Что вызвал {subject or 'этот'} конфликт?"
+            return "Что произошло в результате?"
+
+        # Правило 5: глагол "выдвинул" → "Какие требования выдвинул X?"
+        if 'выдвину' in verb_lower:
+            if subject:
+                return f"Какие требования выдвинул {subject}?"
+            return "Какие требования были выдвинуты?"
+
+        # Правило 6: глагол "создал" → "Что создал X?"
+        if 'создал' in verb_lower or 'формирова' in verb_lower:
+            if obj:
+                return f"Что создал {subject or 'он'}?"
+            return "Что было создано?"
+
+        # Правило 7: глагол "демонстрирова" → "Что демонстрировал X?"
+        if 'демонстр' in verb_lower or 'показыва' in verb_lower:
+            if subject:
+                return f"Что демонстрировал {subject}?"
+            if obj:
+                return f"Что это показывало?"
+            return "Что это демонстрировало?"
+
+        # Правило 8: глагол "стал" → "Чем стал X?"
+        if verb_lower.startswith('стал') or verb_lower.startswith('стала') or verb_lower.startswith('стало'):
+            if obj:
+                return f"Чем стал {subject}?"
+            return "Чем это стало?"
+
+        # Правило 9: глагол "играл" → "Какую роль играл X?"
+        if 'играл' in verb_lower:
+            if subject:
+                return f"Какую роль играл {subject}?"
+            return "Какую роль это играло?"
+
+        # Правило 10: глагол "провел" → "Что провел X?"
+        if 'провел' in verb_lower or 'провожде' in verb_lower:
+            if subject:
+                return f"Что провел {subject}?"
+            if obj:
+                return f"Какую операцию провели?"
+            return "Что было проведено?"
+
+        # Правило 11: глагол "участвовал" → "Где участвовал X?"
+        if 'участвова' in verb_lower:
+            if subject:
+                return f"Где участвовал {subject}?"
+            return "Где это происходило?"
+
+        # Fallback
+        if subject and obj:
+            return f"Какова была роль {subject} в {obj}?"
+        if subject:
+            return f"Что произошло с {subject}?"
 
         return None
 
-    def _is_corrupted_text(self, text: str) -> bool:
-        """Проверяет, не повреждён ли текст"""
-        if any(pattern in text for pattern in [
-            'znp', 'Zogitp', 'modelnp', 'znà', 'sà', 'ру=о', 'nоrистической'
-        ]):
-            return True
-
-        if text.count('=') > 2 or text.count('?') > 1:
-            return True
-
-        if re.search(r'[а-яА-Я][a-zA-Z]|[a-zA-Z][а-яА-Я]', text):
-            return True
-
-        return False
-
-    def _is_valid_question(self, question: str) -> bool:
-        """Проверяет валидность вопроса"""
-        if not question or not question.endswith('?'):
-            return False
-
-        if len(question) < 12 or len(question) > 150:
-            return False
-
-        words = question.split()
-        if len(words) < 3:
-            return False
-
-        # ❌ НОВЫЙ ФИЛЬТР: обнаруживаем копирование текста
-        # Если вопрос начинается с "В ", "Из ", "На " и дальше идёт много текста + "?"
-        # это скорее всего копирование, а не вопрос
-
-        bad_patterns = [
-            r'^в обмен на.*\?$',  # "В обмен на..."
-            r'^в первые.*\?$',  # "В первые года..."
-            r'^из.*\?$',  # "Из даточных..."
-            r'^на.*\?$',  # "На зиму..."
-        ]
-
-        for pattern in bad_patterns:
-            if re.search(pattern, question.lower()):
-                return False
-
-        # ✅ ПРАВИЛЬНЫЕ вопросы должны начинаться с:
-        good_starts = ['что', 'как', 'какой', 'какие', 'кто', 'где', 'когда', 'почему', 'зачем', 'чем', 'из чего']
-
-        first_word = words[0].lower().rstrip('?,.:;')
-        if not first_word in good_starts:
-            # Может быть это не-русский вопрос, пропускаем
-            return False
-
-        # Остальные проверки
-        if re.search(r'что сделал[а]? (управлений?|период|система|революц)\?', question, re.IGNORECASE):
-            return False
-
-        if 'оказал' in question.lower() and 'период' in question.lower():
-            return False
-
-        return True
-
-    def generate_qa_pair(self, context: str) -> Dict:
-        """Генерирует QA пару с полной фильтрацией"""
+    def generate_qa_pair_from_sentence(self, sentence: str) -> Optional[Dict]:
+        """Генерирует Q&A пару из одного предложения"""
         try:
-            context_clean = self.clean_text(context[:700])
-            context_clean = re.sub(r'\s+', ' ', context_clean).strip()
-
-            if len(context_clean) < 120:
+            if len(sentence) < 20:
                 return None
 
-            if self._is_corrupted_text(context_clean):
+            # ✅ Извлекаем части предложения
+            subject, verb, obj = self._extract_parts(sentence)
+
+            # Если нет глагола - пропускаем
+            if not verb:
                 return None
 
-            if any(word in context_clean.lower() for word in ['код', 'import', 'def ']):
-                return None
-
-            sentences = [s.strip() for s in re.split(r'[.!?]+', context_clean)]
-            candidate_sents = [s for s in sentences if len(s.split()) >= 12 and len(s) > 100]
-
-            if not candidate_sents:
-                return None
-
-            answer = candidate_sents[0]
-
-            question = self._generate_question_rut5(answer)
+            # ✅ Генерируем конкретный вопрос
+            question = self._generate_question_from_parts(subject or "", verb, obj or "", sentence)
 
             if not question:
-                question = self._generate_universal_question(answer)
-
-            if not question or not self._is_valid_question(question):
                 return None
 
-            answer = re.sub(r'\s+', ' ', answer).strip()
-            question = re.sub(r'\s+', ' ', question).strip()
+            if not question.endswith('?'):
+                question += '?'
 
-            if len(question) > 15 and len(answer) > 100:
-                return {
-                    "question": question,
-                    "answer": answer,
-                    "context": context_clean[:150]
-                }
+            if len(question) < 5 or len(question) > 200:
+                return None
 
-            return None
+            if not re.search(r'[а-яА-ЯёЁ]', question):
+                return None
+
+            answer = sentence.strip()
+
+            if len(answer) < 20:
+                return None
+
+            return {
+                "question": question,
+                "answer": answer,
+                "context": sentence[:100]
+            }
 
         except Exception as e:
-            print(f"⚠️ Ошибка: {e}")
+            print(f"⚠️ Ошибка: {e}", flush=True)
             return None
 
-    def process_pdf(self, file_path: str, max_cards: int = 10) -> List[Dict]:
-        """Обрабатывает PDF и генерирует карточки"""
-        print(f"\n🔄 Начинаю обработку {file_path}...")
-        print(f"🎯 Цель: {max_cards} карточек")
+    def process_pdf_with_cancellation(self, file_path: str, max_cards: int, db: Session, status_id: int) -> List[Dict]:
+        """Обрабатывает PDF"""
+        print(f"\n🔄 Начинаю обработку {file_path}...", flush=True)
+        print(f"🎯 Максимум: {max_cards} карточек", flush=True)
 
-        chunks = self.extract_meaningful_text(file_path)
+        paragraphs = self.extract_meaningful_text(file_path)
 
-        if not chunks:
-            print("❌ Не найдено подходящих текстовых фрагментов!")
+        if not paragraphs:
+            print("❌ Не найдено абзацев!", flush=True)
             return []
 
-        print(f"✅ Найдено {len(chunks)} содержательных фрагментов")
-
-        chunks.sort(key=lambda x: abs(x['word_count'] - 25))
         flashcards = []
+        seen_questions = set()
 
-        for chunk in chunks[:max_cards * 2]:
+        for p_idx, para_dict in enumerate(paragraphs):
             if len(flashcards) >= max_cards:
                 break
 
-            qa_pair = self.generate_qa_pair(chunk['text'])
+            para_text = para_dict["text"]
+            sentences = self._split_into_sentences(para_text)
 
-            if qa_pair:
-                flashcard = {
-                    "id": len(flashcards) + 1,
-                    "question": qa_pair["question"],
-                    "answer": qa_pair["answer"],
-                    "context": qa_pair["context"],
-                    "source": f"Page {chunk['page']}"
-                }
-                flashcards.append(flashcard)
-                print(f"  ✅ [{len(flashcards)}] {qa_pair['question'][:60]}...")
+            print(f"\n📖 Абзац {p_idx + 1}: {len(sentences)} предложений")
 
-        print(f"✅ Создано {len(flashcards)} карточек")
-        return flashcards
+            for sentence in sentences:
+                if len(flashcards) >= max_cards:
+                    break
+
+                if db is not None:
+                    try:
+                        status = db.query(models.ProcessingStatus).filter(
+                            models.ProcessingStatus.id == status_id
+                        ).first()
+
+                        if status and status.should_cancel:
+                            print(f"⛔ Обработка отменена", flush=True)
+                            return flashcards[:max_cards]
+                    except:
+                        pass
+
+                qa_pair = self.generate_qa_pair_from_sentence(sentence)
+
+                if qa_pair:
+                    question = qa_pair["question"]
+
+                    if question not in seen_questions:
+                        seen_questions.add(question)
+                        flashcards.append({
+                            "question": question,
+                            "answer": qa_pair["answer"],
+                            "context": qa_pair["context"],
+                            "source": ""
+                        })
+                        print(f"  ✅ [{len(flashcards)}/{max_cards}] {question}", flush=True)
+
+                        if len(flashcards) >= max_cards:
+                            break
+
+        print(f"\n✅ Итого: {len(flashcards)} карточек (лимит: {max_cards})", flush=True)
+        return flashcards[:max_cards]
+
+    def process_pdf(self, file_path: str, max_cards: int = 10) -> List[Dict]:
+        """Обрабатывает PDF"""
+        return self.process_pdf_with_cancellation(file_path, max_cards, None, None)
