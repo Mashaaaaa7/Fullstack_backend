@@ -95,7 +95,6 @@ def process_pdf_background(
 
         crud.save_flashcards(db, file_id, user_id, flashcards)
 
-        # ✅ Обновляем статус на "completed"
         status = db.query(models.ProcessingStatus).filter(
             models.ProcessingStatus.id == status_id
         ).first()
