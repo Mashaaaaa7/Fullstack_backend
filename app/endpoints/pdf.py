@@ -1,26 +1,28 @@
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.orm import Session
 import uuid
+import os
+import sys
+import logging
 from app.auth import get_current_user
 from app.models import User, PDFFile
 from app.database import SessionLocal, get_db
 from app import crud, models
-from app.services.qa_generator import QAGenerator
-import os
-import sys
+from app.services.qa_generator import QAPair, load_qg_model
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
-qa_generator = None
 
-
-def get_qa_generator():
-    global qa_generator
-    if qa_generator is None:
-        print("🔧 Инициализирую QAGenerator...", flush=True)
-        sys.stdout.flush()
-        qa_generator = QAGenerator()
-    return qa_generator
+# ============================================================================
+# ✅ STARTUP - Загружаем QA модель при старте
+# ============================================================================
+@router.on_event("startup")
+async def startup_event():
+    """Загружает QA модель при старте приложения"""
+    logger.info("🚀 Инициализация QA модели...")
+    load_qg_model()
+    logger.info("✓ QA модель готова к работе")
 
 
 # ============================================================================
@@ -30,8 +32,9 @@ def get_qa_generator():
 async def upload_pdf(
         file: UploadFile = File(...),
         user: User = Depends(get_current_user),
-        db: Session = Depends(get_db)  # ✅ Use dependency injection
+        db: Session = Depends(get_db)
 ):
+    """Загружает PDF файл"""
     try:
         folder = f"uploads/{user.user_id}/"
         os.makedirs(folder, exist_ok=True)
@@ -62,7 +65,7 @@ async def upload_pdf(
                 user_id=user.user_id
             )
         except Exception as e:
-            print(f"Warning: action not logged: {e}")
+            logger.warning(f"Action not logged: {e}")
 
         return {
             "file_name": file.filename,
@@ -75,7 +78,7 @@ async def upload_pdf(
 
 
 # ============================================================================
-# ✅ BACKGROUND FUNCTION - Only ONE definition! (with status_id)
+# ✅ BACKGROUND FUNCTION - Обработка PDF в фоне
 # ============================================================================
 def process_pdf_background(
         file_id: int,
@@ -88,14 +91,23 @@ def process_pdf_background(
     """Генерирует карточки в фоне и обновляет статус"""
     db = SessionLocal()
     try:
+        logger.info(f"🔄 Начинаю обработку {filename}...")
         print(f"🔄 Начинаю обработку {filename}...", flush=True)
 
-        qa_gen = get_qa_generator()
+        # Инициализируем QA генератор
+        qa_gen = QAPair()
+
+        # Обрабатываем PDF
         flashcards = qa_gen.process_pdf(file_path, max_cards)
 
+        if not flashcards:
+            logger.warning(f"⚠️ Не удалось сгенерировать карточки для {filename}")
+            flashcards = []
+
+        # Сохраняем карточки в БД
         crud.save_flashcards(db, file_id, user_id, flashcards)
 
-        # ✅ Обновляем статус на "completed"
+        # Обновляем статус на "completed"
         status = db.query(models.ProcessingStatus).filter(
             models.ProcessingStatus.id == status_id
         ).first()
@@ -104,6 +116,7 @@ def process_pdf_background(
             status.cards_count = len(flashcards)
             db.commit()
 
+        # Логируем действие
         crud.add_action(
             db=db,
             action="process",
@@ -112,12 +125,14 @@ def process_pdf_background(
             user_id=user_id
         )
 
+        logger.info(f"✅ Карточки для {filename} готовы! Создано: {len(flashcards)}")
         print(f"✅ Карточки для {filename} готовы! Создано: {len(flashcards)}", flush=True)
 
     except Exception as e:
+        logger.error(f"❌ Ошибка при обработке {filename}: {e}")
         print(f"❌ Ошибка при обработке {filename}: {e}", flush=True)
 
-        # ✅ Обновляем статус на "failed"
+        # Обновляем статус на "failed"
         try:
             status = db.query(models.ProcessingStatus).filter(
                 models.ProcessingStatus.id == status_id
@@ -126,14 +141,14 @@ def process_pdf_background(
                 status.status = "failed"
                 db.commit()
         except Exception as e2:
-            print(f"❌ Не смог обновить статус: {e2}")
+            logger.error(f"❌ Не смог обновить статус: {e2}")
 
     finally:
         db.close()
 
 
 # ============================================================================
-# ✅ ENDPOINT 2: START PROCESSING (THIS WAS MISSING!)
+# ✅ ENDPOINT 2: START PROCESSING
 # ============================================================================
 @router.post("/process-pdf/{file_id}")
 async def process_pdf(
@@ -141,7 +156,7 @@ async def process_pdf(
         max_cards: int = Query(10, ge=1, le=100),
         user: User = Depends(get_current_user),
         db: Session = Depends(get_db),
-        background_tasks: BackgroundTasks = BackgroundTasks()  # ✅ USE THIS!
+        background_tasks: BackgroundTasks = BackgroundTasks()
 ):
     """Запускает обработку PDF в фоне"""
     try:
@@ -157,7 +172,7 @@ async def process_pdf(
         if not os.path.exists(pdf_file.file_path):
             raise HTTPException(status_code=404, detail="File deleted or moved")
 
-        # ✅ Создаём запись о статусе обработки
+        # Создаём запись о статусе обработки
         status_record = models.ProcessingStatus(
             pdf_file_id=file_id,
             user_id=user.user_id,
@@ -167,6 +182,7 @@ async def process_pdf(
         db.commit()
         db.refresh(status_record)
 
+        # Добавляем фоновую задачу
         background_tasks.add_task(
             process_pdf_background,
             file_id=file_id,
@@ -184,14 +200,14 @@ async def process_pdf(
         }
 
     except HTTPException:
-        raise  # Re-raise HTTPException
+        raise
     except Exception as e:
-        print(f"❌ Ошибка при запуске обработки: {e}")
+        logger.error(f"❌ Ошибка при запуске обработки: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 # ============================================================================
-# ✅ ENDPOINT 3: Get Processing Status (to check if done)
+# ✅ ENDPOINT 3: Get Processing Status
 # ============================================================================
 @router.get("/processing-status/{file_id}")
 async def check_processing_status(
@@ -286,9 +302,8 @@ async def list_user_pdfs(
         user: User = Depends(get_current_user),
         db: Session = Depends(get_db)
 ):
-    """Получает активные PDF """
+    """Получает активные PDF пользователя"""
     try:
-        # файлы где is_deleted = False
         pdf_files = db.query(PDFFile).filter(
             PDFFile.user_id == user.user_id,
             PDFFile.is_deleted == False
@@ -328,7 +343,7 @@ async def get_history(
                 "filename": action.filename or "unknown",
                 "created_at": action.created_at.isoformat(),
                 "details": action.details or f"{action.action} file",
-                "timestamp": action.created_at.isoformat()  # ✅ Include both field names for compatibility
+                "timestamp": action.created_at.isoformat()
             }
             for action in actions
         ]
@@ -350,7 +365,7 @@ async def delete_pdf(
         user: User = Depends(get_current_user),
         db: Session = Depends(get_db)
 ):
-    """✅ МЯГКОЕ удаление - помечает как удалённый, БД не трогаем"""
+    """Мягкое удаление файла - помечает как удалённый"""
     try:
         pdf_file = db.query(PDFFile).filter(
             PDFFile.id == file_id,
@@ -361,11 +376,11 @@ async def delete_pdf(
         if not pdf_file:
             raise HTTPException(status_code=404, detail="PDF not found")
 
-        # ✅ Помечаем как удалённый (НЕ удаляем из БД!)
+        # Помечаем как удалённый
         pdf_file.is_deleted = True
         db.commit()
 
-        print(f"🗑️ File {pdf_file.file_name} marked as deleted (is_deleted=True)")
+        logger.info(f"🗑️ File {pdf_file.file_name} marked as deleted")
 
         return {
             "success": True,
@@ -375,5 +390,5 @@ async def delete_pdf(
         raise
     except Exception as e:
         db.rollback()
-        print(f"❌ ERROR in delete_pdf: {str(e)}")
+        logger.error(f"❌ ERROR in delete_pdf: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

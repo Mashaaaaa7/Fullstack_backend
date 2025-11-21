@@ -1,328 +1,382 @@
-import re
-import unicodedata
-from typing import List, Dict
-from transformers import pipeline
-import pdfplumber
+"""
+QA Generator для PDF обработки
+Использует fine-tuned T5 модель на SberQuAD датасете
+С правильной подготовкой input и декодированием output
+"""
+import PyPDF2
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 import torch
+import logging
+from typing import List, Dict, Tuple
+import re
+import nltk
+from nltk.tokenize import sent_tokenize
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Загружаем NLTK данные
+try:
+    nltk.data.find('tokenizers/punkt')
+except LookupError:
+    nltk.download('punkt')
+
+# Глобальные переменные для моделей
+qg_model = None
+qg_tokenizer = None
 
 
-class QAGenerator:
-    def __init__(self, use_gpt: bool = False, model_name: str = "cointegrated/rut5-base-multitask"):
-        self.device = 0 if torch.cuda.is_available() else -1
-        self.use_gpt = use_gpt
-        print("⏳ Загружаю русскую модель...")
-        self.generator = pipeline(
-            "text2text-generation",
-            model="cointegrated/rut5-base-multitask",
-            device=self.device,
-            torch_dtype=torch.float32
-        )
-        print("✅ Модель загружена!")
+def load_qg_model():
+    """Загружает fine-tuned модель генерации вопросов"""
+    global qg_model, qg_tokenizer
+    try:
+        # Загружаем fine-tuned модель
+        model_path = "./models/qg-finetuned"
+        logger.info(f"📥 Загружаю fine-tuned модель из {model_path}...")
 
-    def clean_text(self, text: str) -> str:
-        """Очищает текст от артефактов"""
-        if not text:
-            return ""
-        text = ''.join(ch for ch in text if unicodedata.category(ch)[0] != 'C' or ch in '\n\t')
-        text = re.sub(r'[>~<•»«„"\[\]{}()_\-–—]+', '', text)
-        text = re.sub(r'\s+', ' ', text).strip()
-        return text
+        qg_tokenizer = AutoTokenizer.from_pretrained(model_path)
+        qg_model = AutoModelForSeq2SeqLM.from_pretrained(model_path)
 
-    def extract_meaningful_text(self, file_path: str) -> List[Dict]:
-        """Извлекает осмысленные фрагменты"""
-        chunks = []
-        try:
-            with pdfplumber.open(file_path) as pdf:
-                print(f"📄 PDF имеет {len(pdf.pages)} страниц")
+        # Переводим на GPU если доступен
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        qg_model.to(device)
+        qg_model.eval()
 
-                for i, page in enumerate(pdf.pages):
-                    raw_text = page.extract_text()
-                    if not raw_text:
-                        continue
-
-                    text = self.clean_text(raw_text)
-                    if len(text) < 100:
-                        continue
-
-                    text = re.sub(r'^\d{2}\.\d{2}\.\d{4}.*?Colab\s*', '', text)
-                    text = re.sub(r'https?://[^\s]+', '', text)
-                    text = re.sub(r'\d{4}.*?ipynb.*?Colab', '', text, flags=re.IGNORECASE)
-
-                    paragraphs = [p.strip() for p in text.split('\n') if len(p.strip()) > 50]
-
-                    for para in paragraphs:
-                        chunks_from_para = self._split_into_chunks(para)
-                        chunks.extend(chunks_from_para)
-
-            chunks = [c for c in chunks if not any(
-                bad in c['text'].lower() for bad in ['ipynb', 'colab', 'http', '©', '®']
-            )]
-
-            print(f"📊 Найдено {len(chunks)} содержательных фрагментов")
-            return chunks
-        except Exception as e:
-            print(f"❌ Ошибка: {e}")
-            return []
-
-    def _split_into_chunks(self, text: str) -> List[Dict]:
-        """Разбивает текст на смысловые куски"""
-        chunks = []
-        sentences = re.split(r'[.!?]+\s+', text)
-
-        combined = []
-        current = ""
-
-        for sent in sentences:
-            sent = sent.strip()
-            if not sent or len(sent) < 5:
-                continue
-
-            current += sent + ". "
-
-            if len(current.split()) >= 12:
-                combined.append(current.strip())
-                current = ""
-
-        if current.strip():
-            combined.append(current.strip())
-
-        for chunk_text in combined:
-            if len(chunk_text) > 60:
-                chunks.append({
-                    "text": chunk_text,
-                    "page": 0,
-                    "word_count": len(chunk_text.split())
-                })
-
-        return chunks
-
-    def _clean_question(self, text: str) -> str:
-        """Очищает вопрос от мусора"""
-        text = re.sub(r'^напишите вопрос.*?:\s*', '', text, flags=re.IGNORECASE)
-        text = re.sub(r'^вопрос.*?:\s*', '', text, flags=re.IGNORECASE)
-        text = re.sub(r'^на основе.*?:\s*', '', text, flags=re.IGNORECASE)
-        text = re.sub(r'^создайте.*?:\s*', '', text, flags=re.IGNORECASE)
-
-        text = text.rstrip('.,;:')
-
-        if text:
-            text = text[0].upper() + text[1:].lower()
-
-        if text and not text.endswith('?'):
-            text += '?'
-
-        return text.strip()
-
-    def _generate_question_rut5(self, answer: str) -> str:
-        """Генерирует вопрос через RuT5"""
-        try:
-            text_sample = answer[:250]
-            prompt = f"Создайте вопрос к тексту: {text_sample}"
-
-            result = self.generator(
-                prompt,
-                max_new_tokens=40,
-                num_beams=3,
-                temperature=0.6
-            )
-
-            question = self.clean_text(result[0]['generated_text']).strip()
-            question = self._clean_question(question)
-
-            if (15 < len(question) < 120 and '?' in question and
-                    not question.lower().startswith('напишите') and
-                    not question.lower().startswith('создайте')):
-                return question
-
-            return None
-        except Exception as e:
-            print(f"⚠️ RuT5 ошибка: {e}")
-            return None
-
-    def _generate_universal_question(self, answer: str) -> str:
-        """Улучшенный fallback"""
-        words = answer.split()
-        answer_lower = answer.lower()
-
-        bad_words = {
-            'это', 'для', 'при', 'как', 'что', 'в', 'по', 'на', 'с', 'и', 'или', 'то',
-            'был', 'была', 'были', 'быть', 'являются', 'является', 'есть', 'имели',
-            'имеют', 'находится', 'находились', 'важный', 'важная', 'главный', 'новый',
-            'процесс', 'великого', 'например', 'несмотря', 'главные', 'местное',
-            'влияние', 'административное', 'уезды', 'екатерины', 'система', 'реформа'
-        }
-
-        idx = 0
-        while idx < len(words) and words[idx].lower() in bad_words:
-            idx += 1
-
-        remaining_words = words[idx:]
-
-        key_phrase = None
-        for w in remaining_words[:15]:
-            w_lower = w.lower().rstrip(',:;.')
-            if (len(w_lower) > 5 and w[0].isupper() and w_lower not in bad_words):
-                key_phrase = w_lower
-                break
-
-        if not key_phrase:
-            return None
-
-        if any(word in answer_lower for word in ['оказала', 'привел', 'вызва']):
-            return f"Какое воздействие имел {key_phrase}?"
-        elif any(word in answer_lower for word in ['развив', 'эволюц', 'преобразов']):
-            return f"Как происходило развитие {key_phrase}?"
-        elif any(word in answer_lower for word in ['привела', 'послужила', 'способствова']):
-            return f"Какие факторы способствовали {key_phrase}?"
-        elif any(word in answer_lower for word in ['играла', 'выполня', 'служила', 'роль']):
-            return f"Какую роль выполнял {key_phrase}?"
-        elif any(word in answer_lower for word in ['содержит', 'включает']):
-            return f"Из чего состоит {key_phrase}?"
-        elif any(word in answer_lower for word in ['представляет', 'явлением']):
-            return f"Что такое {key_phrase}?"
-        elif any(word in answer_lower for word in ['ввел', 'введен', 'подписать']):
-            return f"Что сделал {key_phrase}?"
-
-        return None
-
-    def _is_corrupted_text(self, text: str) -> bool:
-        """Проверяет, не повреждён ли текст"""
-        if any(pattern in text for pattern in [
-            'znp', 'Zogitp', 'modelnp', 'znà', 'sà', 'ру=о', 'nоrистической'
-        ]):
-            return True
-
-        if text.count('=') > 2 or text.count('?') > 1:
-            return True
-
-        if re.search(r'[а-яА-Я][a-zA-Z]|[a-zA-Z][а-яА-Я]', text):
-            return True
-
-        return False
-
-    def _is_valid_question(self, question: str) -> bool:
-        """Проверяет валидность вопроса"""
-        if not question or not question.endswith('?'):
-            return False
-
-        if len(question) < 12 or len(question) > 150:
-            return False
-
-        words = question.split()
-        if len(words) < 3:
-            return False
-
-        # ❌ НОВЫЙ ФИЛЬТР: обнаруживаем копирование текста
-        # Если вопрос начинается с "В ", "Из ", "На " и дальше идёт много текста + "?"
-        # это скорее всего копирование, а не вопрос
-
-        bad_patterns = [
-            r'^в обмен на.*\?$',  # "В обмен на..."
-            r'^в первые.*\?$',  # "В первые года..."
-            r'^из.*\?$',  # "Из даточных..."
-            r'^на.*\?$',  # "На зиму..."
-        ]
-
-        for pattern in bad_patterns:
-            if re.search(pattern, question.lower()):
-                return False
-
-        # ✅ ПРАВИЛЬНЫЕ вопросы должны начинаться с:
-        good_starts = ['что', 'как', 'какой', 'какие', 'кто', 'где', 'когда', 'почему', 'зачем', 'чем', 'из чего']
-
-        first_word = words[0].lower().rstrip('?,.:;')
-        if not first_word in good_starts:
-            # Может быть это не-русский вопрос, пропускаем
-            return False
-
-        # Остальные проверки
-        if re.search(r'что сделал[а]? (управлений?|период|система|революц)\?', question, re.IGNORECASE):
-            return False
-
-        if 'оказал' in question.lower() and 'период' in question.lower():
-            return False
-
+        logger.info(f"✓ Fine-tuned T5 модель загружена на {device}")
         return True
 
-    def generate_qa_pair(self, context: str) -> Dict:
-        """Генерирует QA пару с полной фильтрацией"""
-        try:
-            context_clean = self.clean_text(context[:700])
-            context_clean = re.sub(r'\s+', ' ', context_clean).strip()
+    except Exception as e:
+        logger.error(f"✗ Ошибка загрузки fine-tuned модели: {e}")
+        return False
 
-            if len(context_clean) < 120:
-                return None
 
-            if self._is_corrupted_text(context_clean):
-                return None
+def extract_text_from_pdf(pdf_path: str) -> List[str]:
+    """Извлекает текст из PDF файла по страницам"""
+    try:
+        pages_text = []
+        with open(pdf_path, 'rb') as f:
+            pdf_reader = PyPDF2.PdfReader(f)
+            for page_num, page in enumerate(pdf_reader.pages):
+                try:
+                    extracted = page.extract_text()
+                    if extracted and extracted.strip():
+                        pages_text.append(extracted)
+                except Exception as e:
+                    logger.warning(f"Ошибка извлечения страницы {page_num}: {e}")
+                    continue
 
-            if any(word in context_clean.lower() for word in ['код', 'import', 'def ']):
-                return None
-
-            sentences = [s.strip() for s in re.split(r'[.!?]+', context_clean)]
-            candidate_sents = [s for s in sentences if len(s.split()) >= 12 and len(s) > 100]
-
-            if not candidate_sents:
-                return None
-
-            answer = candidate_sents[0]
-
-            question = self._generate_question_rut5(answer)
-
-            if not question:
-                question = self._generate_universal_question(answer)
-
-            if not question or not self._is_valid_question(question):
-                return None
-
-            answer = re.sub(r'\s+', ' ', answer).strip()
-            question = re.sub(r'\s+', ' ', question).strip()
-
-            if len(question) > 15 and len(answer) > 100:
-                return {
-                    "question": question,
-                    "answer": answer,
-                    "context": context_clean[:150]
-                }
-
-            return None
-
-        except Exception as e:
-            print(f"⚠️ Ошибка: {e}")
-            return None
-
-    def process_pdf(self, file_path: str, max_cards: int = 10) -> List[Dict]:
-        """Обрабатывает PDF и генерирует карточки"""
-        print(f"\n🔄 Начинаю обработку {file_path}...")
-        print(f"🎯 Цель: {max_cards} карточек")
-
-        chunks = self.extract_meaningful_text(file_path)
-
-        if not chunks:
-            print("❌ Не найдено подходящих текстовых фрагментов!")
+        if not pages_text:
+            logger.error("Не удалось извлечь текст из PDF")
             return []
 
-        print(f"✅ Найдено {len(chunks)} содержательных фрагментов")
+        total_chars = sum(len(p) for p in pages_text)
+        logger.info(f"✓ Извлечено {len(pages_text)} страниц, всего {total_chars} символов")
+        return pages_text
+    except Exception as e:
+        logger.error(f"✗ Ошибка при чтении PDF: {e}")
+        return []
 
-        chunks.sort(key=lambda x: abs(x['word_count'] - 25))
-        flashcards = []
 
-        for chunk in chunks[:max_cards * 2]:
-            if len(flashcards) >= max_cards:
-                break
+def split_page_into_paragraphs(page_text: str) -> List[str]:
+    """Разбивает текст страницы на абзацы"""
+    paragraphs = re.split(r'\n\n+', page_text)
 
-            qa_pair = self.generate_qa_pair(chunk['text'])
+    valid_paragraphs = []
+    for para in paragraphs:
+        para = para.strip()
+        if len(para) > 100:
+            valid_paragraphs.append(para)
 
-            if qa_pair:
-                flashcard = {
-                    "id": len(flashcards) + 1,
-                    "question": qa_pair["question"],
-                    "answer": qa_pair["answer"],
-                    "context": qa_pair["context"],
-                    "source": f"Page {chunk['page']}"
-                }
-                flashcards.append(flashcard)
-                print(f"  ✅ [{len(flashcards)}] {qa_pair['question'][:60]}...")
+    return valid_paragraphs
 
-        print(f"✅ Создано {len(flashcards)} карточек")
-        return flashcards
+
+def create_chunks_from_pages(pages_text: List[str]) -> List[str]:
+    """Создаёт логические куски из страниц и абзацев"""
+    chunks = []
+
+    for page_num, page_text in enumerate(pages_text):
+        paragraphs = split_page_into_paragraphs(page_text)
+
+        if not paragraphs:
+            continue
+
+        i = 0
+        while i < len(paragraphs):
+            chunk = paragraphs[i]
+
+            if i + 1 < len(paragraphs):
+                combined = chunk + "\n\n" + paragraphs[i + 1]
+                if len(combined) < 2000:
+                    chunk = combined
+                    i += 1
+
+            if i + 1 < len(paragraphs):
+                combined = chunk + "\n\n" + paragraphs[i + 1]
+                if len(combined) < 2500:
+                    chunk = combined
+                    i += 1
+
+            if chunk and len(chunk) > 100:
+                chunks.append(chunk)
+
+            i += 1
+
+    logger.info(f"✓ Создано {len(chunks)} контекстных фрагментов")
+    return chunks
+
+
+def extract_sentences_as_candidates(text: str) -> List[Tuple[str, float]]:
+    """
+    Извлекает предложения как кандидаты для генерации вопросов
+    """
+    if not text or len(text.strip()) < 50:
+        return []
+
+    try:
+        sentences = sent_tokenize(text)
+    except:
+        sentences = re.split(r'[.!?]', text)
+
+    candidates = []
+
+    for sentence in sentences:
+        sentence = sentence.strip()
+
+        # Пропускаем очень короткие предложения
+        if len(sentence) < 20:
+            continue
+
+        # Пропускаем если это просто пунктуация
+        if not re.search(r'[а-яА-Я]', sentence):
+            continue
+
+        # Все предложения имеют базовый приоритет
+        score = 0.7
+
+        # Длинные предложения более информативны
+        if len(sentence) > 100:
+            score = 0.85
+        elif len(sentence) > 60:
+            score = 0.8
+
+        candidates.append((sentence, score))
+
+    # Берём первые несколько предложений
+    return candidates[:4]
+
+
+def clean_generated_question(raw_text: str) -> str:
+    """
+    Тщательно очищает сгенерированный текст от артефактов
+    """
+    if not raw_text:
+        return None
+
+    text = str(raw_text).strip()
+
+    # Убираем специальные токены T5
+    text = re.sub(r'<extra_id_\d+>', '', text)
+    text = re.sub(r'</s>|<s>|<pad>|<unk>|<mask>', '', text)
+
+    # Убираем управляющие команды
+    text = re.sub(r'generate\s+question:?\s*', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'question:?\s*', '', text, flags=re.IGNORECASE)
+
+    # Убираем мусор из декодирования (повторяющиеся символы)
+    text = re.sub(r'([а-яё])\1{2,}', r'\1', text)  # аааа -> а
+
+    # Убираем множественные пробелы и пунктуацию
+    text = re.sub(r'\s+', ' ', text).strip()
+    text = re.sub(r'^[^\w\u0400-\u04FF]+', '', text)  # Мусор в начале
+    text = re.sub(r'[^\w\u0400-\u04FF\.!?ё]+$', '', text)  # Мусор в конце
+
+    # Если текст слишком короткий или пустой
+    if not text or len(text) < 5:
+        return None
+
+    # Убеждаемся что заканчивается вопросительным знаком
+    text = text.rstrip('.!,;:')
+    if not text.endswith('?'):
+        text = text + '?'
+
+    logger.debug(f"Cleaned: {text}")
+    return text
+
+
+def generate_question_from_context(context: str) -> str:
+    """
+    Генерирует вопрос из контекста используя fine-tuned T5 модель
+    Использует правильный формат input/output
+    """
+
+    if not qg_model or not qg_tokenizer:
+        logger.warning("Модель не загружена")
+        return None
+
+    try:
+        # Подготавливаем input - используем контекст как есть
+        input_text = context[:500].strip()
+
+        if not input_text:
+            return None
+
+        logger.debug(f"Input text: {input_text[:100]}...")
+
+        # Токенизируем с правильными параметрами
+        inputs = qg_tokenizer(
+            input_text,
+            max_length=512,
+            truncation=True,
+            padding="longest",
+            return_tensors="pt"
+        )
+
+        # Генерируем на том же устройстве что и модель
+        device = next(qg_model.parameters()).device
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+
+        with torch.no_grad():
+            # Используем beam search для более хорошего качества
+            output_ids = qg_model.generate(
+                input_ids=inputs['input_ids'],
+                attention_mask=inputs['attention_mask'],
+                max_length=100,
+                min_length=10,
+                num_beams=5,
+                temperature=0.7,
+                do_sample=False,
+                early_stopping=True,
+                no_repeat_ngram_size=2,  # Избегаем повторений
+                length_penalty=1.0
+            )
+
+        # Декодируем с skip_special_tokens=True
+        raw_question = qg_tokenizer.decode(
+            output_ids[0],
+            skip_special_tokens=True
+        ).strip()
+
+        logger.debug(f"Raw output: {raw_question}")
+
+        # Очищаем
+        question = clean_generated_question(raw_question)
+
+        if question and len(question) > 7:
+            logger.debug(f"✓ Final question: {question}")
+            return question
+
+        logger.debug(f"❌ Question too short after cleaning")
+        return None
+
+    except Exception as e:
+        logger.error(f"❌ Ошибка генерации вопроса: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
+def generate_qa_from_text_neural(text: str, num_pairs: int = 2) -> List[Dict]:
+    """
+    Генерация QA пар используя fine-tuned neural модель
+    """
+
+    if not text or len(text.strip()) < 100:
+        return []
+
+    qa_pairs = []
+
+    # Извлекаем предложения
+    candidates = extract_sentences_as_candidates(text)
+
+    if not candidates:
+        logger.debug("Не найдены предложения для генерации")
+        return []
+
+    # Генерируем вопросы для каждого предложения
+    for context, relevance in candidates[:num_pairs]:
+        try:
+            question = generate_question_from_context(context)
+
+            # Проверяем валидность
+            if (question and
+                len(question) > 7 and
+                question.endswith('?') and
+                question.lower() != context.lower()[:len(question)]):
+
+                qa_pairs.append({
+                    "question": question,
+                    "answer": context,
+                    "confidence": round(float(relevance), 3)
+                })
+                logger.debug(f"✓ Valid pair created")
+            else:
+                if not question:
+                    logger.debug(f"⚠️ No question generated")
+                elif not question.endswith('?'):
+                    logger.debug(f"⚠️ Question doesn't end with ?")
+                else:
+                    logger.debug(f"⚠️ Question matches answer")
+
+        except Exception as e:
+            logger.debug(f"Ошибка генерации QA: {e}")
+            continue
+
+    return qa_pairs
+
+
+def process_pdf(pdf_path: str, max_cards: int = 10) -> List[Dict]:
+    """Основной метод - обрабатывает PDF и генерирует карточки"""
+
+    logger.info(f"🔄 Обработка PDF: {pdf_path}")
+
+    pages_text = extract_text_from_pdf(pdf_path)
+    if not pages_text:
+        return []
+
+    chunks = create_chunks_from_pages(pages_text)
+    if not chunks:
+        return []
+
+    logger.info(f"📚 Всего фрагментов: {len(chunks)}")
+
+    flashcards = []
+
+    for i, chunk in enumerate(chunks):
+        if len(flashcards) >= max_cards:
+            logger.info(f"✓ Достаточно карточек ({len(flashcards)}/{max_cards})")
+            break
+
+        if (i + 1) % 5 == 0:
+            logger.info(f"📝 Фрагмент {i + 1}/{len(chunks)}... (карточек: {len(flashcards)})")
+
+        qa_pairs = generate_qa_from_text_neural(chunk, num_pairs=2)
+
+        for qa in qa_pairs:
+            if len(flashcards) < max_cards:
+                flashcards.append({
+                    "question": qa["question"],
+                    "answer": qa["answer"],
+                    "context": chunk[:300],
+                    "confidence": qa["confidence"],
+                    "source": pdf_path
+                })
+
+    logger.info(f"✅ Сгенерировано {len(flashcards)} карточек из {len(chunks)} фрагментов")
+    return flashcards
+
+
+class QAPair:
+    """Класс QA генератора - основной интерфейс"""
+
+    def __init__(self):
+        """Инициализирует генератор и загружает fine-tuned модель"""
+        logger.info("🔧 Инициализирую Neural QA генератор...")
+        load_qg_model()
+
+    def process_pdf(self, pdf_path: str, max_cards: int = 10) -> List[Dict]:
+        """Обрабатывает PDF и возвращает список карточек"""
+        return process_pdf(pdf_path, max_cards)
+
+    def generate_qa(self, text: str) -> List[Dict]:
+        """Генерирует QA пары из текста"""
+        return generate_qa_from_text_neural(text)
