@@ -1,0 +1,11 @@
+pydantic~=2.12.4
+fastapi~=0.121.3
+python-jose~=3.5.0
+passlib~=1.7.4
+SQLAlchemy~=2.0.44
+torch~=2.9.1
+datasets~=4.4.1
+transformers~=4.57.1
+PyPDF2~=3.0.1
+nltk~=3.9.2
+uvicorn~=0.38.0
