@@ -1,3 +1,6 @@
-/.venv/
-/uploads/
-/.idea/
+echo *.db >> .gitignore
+echo .env >> .gitignore
+echo __pycache__/ >> .gitignore
+echo .venv >> .gitignore
+echo node_modules >> .gitignore
+echo build/ >> .gitignore
