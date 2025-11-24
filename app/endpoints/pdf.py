@@ -132,7 +132,7 @@ def process_pdf_background(
 
 
 # ============================================================================
-# ✅ ENDPOINT 2: START PROCESSING (THIS WAS MISSING!)
+# ✅ ENDPOINT 2: START PROCESSING 
 # ============================================================================
 @router.post("/process-pdf/{file_id}")
 async def process_pdf(
@@ -237,13 +237,16 @@ async def check_processing_status(
 # ============================================================================
 # ✅ ENDPOINT 4: Get Generated Cards
 # ============================================================================
+
 @router.get("/cards/{file_id}")
 async def get_cards(
-        file_id: int,
-        user: User = Depends(get_current_user),
-        db: Session = Depends(get_db)
+    file_id: int,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(10, ge=1, le=100),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
-    """Получает сгенерированные карточки"""
+    """Получает сгенерированные карточки с пагинацией"""
     try:
         pdf_file = db.query(PDFFile).filter(
             PDFFile.id == file_id,
@@ -253,7 +256,17 @@ async def get_cards(
         if not pdf_file:
             raise HTTPException(status_code=404, detail="PDF not found")
 
-        flashcards = crud.get_flashcards_by_pdf(db, file_id, user.user_id)
+        # Получаем всего карточек (для расчета общего количества)
+        total = db.query(models.Flashcard).filter(
+            models.Flashcard.pdf_file_id == file_id,
+            models.Flashcard.user_id == user.user_id
+        ).count()
+
+        # Получаем карточки с пагинацией
+        flashcards = db.query(models.Flashcard).filter(
+            models.Flashcard.pdf_file_id == file_id,
+            models.Flashcard.user_id == user.user_id
+        ).offset(skip).limit(limit).all()
 
         return {
             "success": True,
@@ -269,7 +282,10 @@ async def get_cards(
                 }
                 for card in flashcards
             ],
-            "total": len(flashcards)
+            "total": total,
+            "skip": skip,
+            "limit": limit,
+            "pages": (total + limit - 1) // limit  # Количество страниц
         }
     except HTTPException:
         raise
