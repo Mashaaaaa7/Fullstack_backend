@@ -303,7 +303,6 @@ async def list_user_pdfs(
 ):
     """Получает активные PDF """
     try:
-        # файлы где is_deleted = False
         pdf_files = db.query(PDFFile).filter(
             PDFFile.user_id == user.user_id,
             PDFFile.is_deleted == False
