@@ -43,7 +43,6 @@ class Flashcard(Base):
     answer = Column(Text, nullable=False)
     context = Column(Text)
     source = Column(String)
-    # ✅ ДОБАВЛЕНА
     created_at = Column(DateTime, default=get_msk_time)
 
     pdf_file = relationship("PDFFile", back_populates="flashcards")
@@ -57,7 +56,6 @@ class ActionHistory(Base):
     filename = Column(String(255))
     details = Column(Text)
     user_id = Column(Integer, ForeignKey('users.user_id', ondelete='CASCADE'), nullable=False)
-    # ✅ ДОБАВЛЕНА
     created_at = Column(DateTime, default=get_msk_time)
 
     user = relationship("User", back_populates="action_history")
@@ -72,7 +70,6 @@ class ProcessingStatus(Base):
     cards_count = Column(Integer, default=0)
     should_cancel = Column(Boolean, default=False)
     error_message = Column(Text, nullable=True)
-    # ✅ Московское время
     created_at = Column(DateTime, default=get_msk_time)
     updated_at = Column(DateTime, default=get_msk_time, onupdate=get_msk_time)
 
