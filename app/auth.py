@@ -48,11 +48,11 @@ def get_current_user(credentials=Depends(security)):
     try:
         token = credentials.credentials
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id: str = payload.get("sub")  # Получаем как строку
+        user_id: str = payload.get("sub")
         if user_id is None:
             raise credentials_exception
 
-        user = database.query(User).filter(User.user_id == int(user_id)).first()  # Конвертируем в int
+        user = database.query(User).filter(User.user_id == int(user_id)).first()
         if user is None:
             raise credentials_exception
 
