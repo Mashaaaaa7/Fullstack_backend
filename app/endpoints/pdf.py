@@ -13,7 +13,6 @@ router = APIRouter()
 
 qa_generator = None
 
-
 def get_qa_generator():
     global qa_generator
     if qa_generator is None:
@@ -21,8 +20,6 @@ def get_qa_generator():
         sys.stdout.flush()
         qa_generator = QAGenerator()
     return qa_generator
-
-
 
 # ENDPOINT 1: Upload PDF
 @router.post("/upload-pdf")

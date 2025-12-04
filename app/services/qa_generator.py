@@ -6,7 +6,6 @@ import torch
 from sqlalchemy.orm import Session
 from app import models
 
-
 class QAGenerator:
     """
     Извлекаем:
