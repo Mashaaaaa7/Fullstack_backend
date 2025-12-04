@@ -23,9 +23,8 @@ def get_qa_generator():
     return qa_generator
 
 
-# ============================================================================
-# ✅ ENDPOINT 1: Upload PDF
-# ============================================================================
+
+# ENDPOINT 1: Upload PDF
 @router.post("/upload-pdf")
 async def upload_pdf(
         file: UploadFile = File(...),
@@ -74,9 +73,7 @@ async def upload_pdf(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ============================================================================
-# ✅ BACKGROUND FUNCTION - Only ONE definition! (with status_id)
-# ============================================================================
+# BACKGROUND FUNCTION - Only ONE definition! (with status_id)
 def process_pdf_background(
         file_id: int,
         file_path: str,
@@ -130,10 +127,8 @@ def process_pdf_background(
     finally:
         db.close()
 
+# ENDPOINT 2: START PROCESSING
 
-# ============================================================================
-# ✅ ENDPOINT 2: START PROCESSING 
-# ============================================================================
 @router.post("/process-pdf/{file_id}")
 async def process_pdf(
         file_id: int,
@@ -156,7 +151,7 @@ async def process_pdf(
         if not os.path.exists(pdf_file.file_path):
             raise HTTPException(status_code=404, detail="File deleted or moved")
 
-        # ✅ Создаём запись о статусе обработки
+        # Создаём запись о статусе обработки
         status_record = models.ProcessingStatus(
             pdf_file_id=file_id,
             user_id=user.user_id,
@@ -188,10 +183,7 @@ async def process_pdf(
         print(f"❌ Ошибка при запуске обработки: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
-# ============================================================================
-# ✅ ENDPOINT 3: Get Processing Status (to check if done)
-# ============================================================================
+# ENDPOINT 3: Get Processing Status (to check if done)
 @router.get("/processing-status/{file_id}")
 async def check_processing_status(
         file_id: int,
@@ -234,10 +226,7 @@ async def check_processing_status(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ============================================================================
-# ✅ ENDPOINT 4: Get Generated Cards
-# ============================================================================
-
+# ENDPOINT 4: Get Generated Cards
 @router.get("/cards/{file_id}")
 async def get_cards(
     file_id: int,
@@ -293,9 +282,7 @@ async def get_cards(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ============================================================================
-# ✅ ENDPOINT 5: List User's PDFs
-# ============================================================================
+# ENDPOINT 5: List User's PDFs
 @router.get("/pdfs")
 async def list_user_pdfs(
         user: User = Depends(get_current_user),
@@ -324,9 +311,7 @@ async def list_user_pdfs(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ============================================================================
-# ✅ ENDPOINT 6: Get Action History
-# ============================================================================
+# ENDPOINT 6: Get Action History
 @router.get("/history")
 async def get_history(
         user: User = Depends(get_current_user),
@@ -342,7 +327,7 @@ async def get_history(
                 "filename": action.filename or "unknown",
                 "created_at": action.created_at.isoformat(),
                 "details": action.details or f"{action.action} file",
-                "timestamp": action.created_at.isoformat()  # ✅ Include both field names for compatibility
+                "timestamp": action.created_at.isoformat()
             }
             for action in actions
         ]
@@ -355,16 +340,14 @@ async def get_history(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ============================================================================
-# ✅ ENDPOINT 7: Delete PDF and Cards
-# ============================================================================
+# ENDPOINT 7: Delete PDF and Cards
 @router.delete("/delete-file/{file_id}")
 async def delete_pdf(
         file_id: int,
         user: User = Depends(get_current_user),
         db: Session = Depends(get_db)
 ):
-    """✅ МЯГКОЕ удаление - помечает как удалённый, БД не трогаем"""
+    """помечает как удалённый, БД не трогаем"""
     try:
         pdf_file = db.query(PDFFile).filter(
             PDFFile.id == file_id,
@@ -375,7 +358,7 @@ async def delete_pdf(
         if not pdf_file:
             raise HTTPException(status_code=404, detail="PDF not found")
 
-        # ✅ Помечаем как удалённый (НЕ удаляем из БД!)
+        # Помечаем как удалённый (НЕ удаляем из БД!)
         pdf_file.is_deleted = True
         db.commit()
 
