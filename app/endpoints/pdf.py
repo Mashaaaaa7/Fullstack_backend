@@ -10,7 +10,6 @@ import os
 import sys
 
 router = APIRouter()
-mm
 qa_generator = None
 
 def get_qa_generator():
