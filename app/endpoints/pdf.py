@@ -10,9 +10,8 @@ import os
 import sys
 
 router = APIRouter()
-
+mm
 qa_generator = None
-
 
 def get_qa_generator():
     global qa_generator
@@ -22,9 +21,7 @@ def get_qa_generator():
         qa_generator = QAGenerator()
     return qa_generator
 
-
 # ENDPOINT 1: Upload PDF
-
 @router.post("/upload-pdf")
 async def upload_pdf(
         file: UploadFile = File(...),
@@ -72,8 +69,8 @@ async def upload_pdf(
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
-# BACKGROUND FUNCTION - Only ONE definition! (with status_id)
 
+# BACKGROUND FUNCTION - Only ONE definition! (with status_id)
 def process_pdf_background(
         file_id: int,
         file_path: str,
@@ -135,7 +132,7 @@ async def process_pdf(
         max_cards: int = Query(10, ge=1, le=100),
         user: User = Depends(get_current_user),
         db: Session = Depends(get_db),
-        background_tasks: BackgroundTasks = BackgroundTasks()
+        background_tasks: BackgroundTasks = BackgroundTasks()  # ✅ USE THIS!
 ):
     """Запускает обработку PDF в фоне"""
     try:
@@ -183,9 +180,7 @@ async def process_pdf(
         print(f"❌ Ошибка при запуске обработки: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 # ENDPOINT 3: Get Processing Status (to check if done)
-
 @router.get("/processing-status/{file_id}")
 async def check_processing_status(
         file_id: int,
@@ -227,8 +222,8 @@ async def check_processing_status(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# ENDPOINT 4: Get Generated Cards (ИСПРАВЛЕНО - ФИЛЬТРУЕМ СКРЫТЫЕ И УДАЛЁННЫЕ)
 
+# ENDPOINT 4: Get Generated Cards
 @router.get("/cards/{file_id}")
 async def get_cards(
     file_id: int,
@@ -237,7 +232,7 @@ async def get_cards(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Получает видимые карточки с пагинацией (скрытые и удалённые НЕ показывает)"""
+    """Получает сгенерированные карточки с пагинацией"""
     try:
         pdf_file = db.query(PDFFile).filter(
             PDFFile.id == file_id,
@@ -247,18 +242,16 @@ async def get_cards(
         if not pdf_file:
             raise HTTPException(status_code=404, detail="PDF not found")
 
+        # Получаем всего карточек (для расчета общего количества)
         total = db.query(models.Flashcard).filter(
             models.Flashcard.pdf_file_id == file_id,
-            models.Flashcard.user_id == user.user_id,
-            models.Flashcard.is_hidden == False,
-            models.Flashcard.is_deleted == False
+            models.Flashcard.user_id == user.user_id
         ).count()
 
+        # Получаем карточки с пагинацией
         flashcards = db.query(models.Flashcard).filter(
             models.Flashcard.pdf_file_id == file_id,
-            models.Flashcard.user_id == user.user_id,
-            models.Flashcard.is_hidden == False,
-            models.Flashcard.is_deleted == False
+            models.Flashcard.user_id == user.user_id
         ).offset(skip).limit(limit).all()
 
         return {
@@ -271,8 +264,6 @@ async def get_cards(
                     "answer": card.answer,
                     "context": card.context,
                     "source": card.source,
-                    "is_hidden": card.is_hidden,
-                    "is_deleted": card.is_deleted,
                     "created_at": card.created_at.isoformat() if card.created_at else None
                 }
                 for card in flashcards
@@ -280,7 +271,7 @@ async def get_cards(
             "total": total,
             "skip": skip,
             "limit": limit,
-            "pages": (total + limit - 1) // limit
+            "pages": (total + limit - 1) // limit  # Количество страниц
         }
     except HTTPException:
         raise
@@ -289,7 +280,6 @@ async def get_cards(
 
 
 # ENDPOINT 5: List User's PDFs
-
 @router.get("/pdfs")
 async def list_user_pdfs(
         user: User = Depends(get_current_user),
@@ -317,8 +307,8 @@ async def list_user_pdfs(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# ENDPOINT 6: Get Action History
 
+# ENDPOINT 6: Get Action History
 @router.get("/history")
 async def get_history(
         user: User = Depends(get_current_user),
@@ -346,15 +336,15 @@ async def get_history(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# ENDPOINT 7: Delete PDF - SOFT DELETE
 
+# ENDPOINT 7: Delete PDF and Cards
 @router.delete("/delete-file/{file_id}")
 async def delete_pdf(
         file_id: int,
         user: User = Depends(get_current_user),
         db: Session = Depends(get_db)
 ):
-    """МЯГКОЕ удаление PDF (помечает как удалённый, НЕ удаляем из БД)"""
+    """помечает как удалённый, БД не трогаем"""
     try:
         pdf_file = db.query(PDFFile).filter(
             PDFFile.id == file_id,
@@ -365,123 +355,19 @@ async def delete_pdf(
         if not pdf_file:
             raise HTTPException(status_code=404, detail="PDF not found")
 
-        filename = pdf_file.file_name
-
-        # МЯГКОЕ удаление - помечаем как удалённый (НЕ удаляем!)
+        # Помечаем как удалённый (НЕ удаляем из БД!)
         pdf_file.is_deleted = True
         db.commit()
 
-        crud.add_action(
-            db=db,
-            action="delete_file",
-            filename=filename,
-            details=f"File marked as deleted",
-            user_id=user.user_id
-        )
-
-        print(f"🗑️ File {filename} marked as deleted (is_deleted=True)")
+        print(f"🗑️ File {pdf_file.file_name} marked as deleted (is_deleted=True)")
 
         return {
             "success": True,
-            "message": f"File {filename} deleted"
+            "message": f"File {pdf_file.file_name} deleted"
         }
     except HTTPException:
         raise
     except Exception as e:
         db.rollback()
         print(f"❌ ERROR in delete_pdf: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ============================================================================
-# ✅ ENDPOINT 8: Toggle Card Visibility (НОВЫЙ - ДЛЯ ГЛАЗА)
-# ============================================================================
-@router.patch("/cards/{card_id}/toggle-visibility")
-async def toggle_card_visibility(
-        card_id: int,
-        user: User = Depends(get_current_user),
-        db: Session = Depends(get_db)
-):
-    """Переключает видимость карточки (показать/скрыть) - TOGGLE!"""
-    try:
-        flashcard = db.query(models.Flashcard).filter(
-            models.Flashcard.id == card_id,
-            models.Flashcard.user_id == user.user_id
-        ).first()
-
-        if not flashcard:
-            raise HTTPException(status_code=404, detail="Card not found")
-
-        # ✅ Переключаем видимость (toggle)
-        flashcard.is_hidden = not flashcard.is_hidden
-        db.commit()
-        db.refresh(flashcard)
-
-        print(f"👁️ Card {card_id}: is_hidden toggled to {flashcard.is_hidden}")
-
-        return {
-            "success": True,
-            "card_id": card_id,
-            "is_hidden": flashcard.is_hidden,
-            "message": "hidden" if flashcard.is_hidden else "visible"
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-
-# ENDPOINT 9: Clear (Hide) Hidden Cards - SOFT DELETE
-
-@router.delete("/cards/{file_id}/clear-hidden")
-async def clear_hidden_cards(
-        file_id: int,
-        user: User = Depends(get_current_user),
-        db: Session = Depends(get_db)
-):
-    """МЯГКОЕ удаление скрытых карточек (помечаем как удалённые, НЕ удаляем)"""
-    try:
-        pdf_file = db.query(PDFFile).filter(
-            PDFFile.id == file_id,
-            PDFFile.user_id == user.user_id
-        ).first()
-
-        if not pdf_file:
-            raise HTTPException(status_code=404, detail="PDF not found")
-
-        # ✅ Находим скрытые карточки
-        hidden_cards = db.query(models.Flashcard).filter(
-            models.Flashcard.pdf_file_id == file_id,
-            models.Flashcard.user_id == user.user_id,
-            models.Flashcard.is_hidden == True
-        ).all()
-
-        deleted_count = len(hidden_cards)
-
-        # ✅ МЯГКОЕ удаление - помечаем как удалённые (НЕ удаляем!)
-        for card in hidden_cards:
-            card.is_deleted = True
-
-        db.commit()
-
-        crud.add_action(
-            db=db,
-            action="delete_hidden",
-            filename=pdf_file.file_name,
-            details=f"Marked {deleted_count} hidden cards as deleted",
-            user_id=user.user_id
-        )
-
-        print(f"🗑️ Marked {deleted_count} hidden cards as deleted (is_deleted=True)")
-
-        return {
-            "success": True,
-            "message": f"Marked {deleted_count} hidden cards as deleted",
-            "deleted_count": deleted_count
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        db.rollback()
-        print(f"❌ ERROR in clear_hidden_cards: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
