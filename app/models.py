@@ -43,6 +43,8 @@ class Flashcard(Base):
     answer = Column(Text, nullable=False)
     context = Column(Text)
     source = Column(String)
+    is_hidden = Column(Boolean, default=False)
+    is_deleted = Column(Boolean, default=False)
     created_at = Column(DateTime, default=get_msk_time)
 
     pdf_file = relationship("PDFFile", back_populates="flashcards")
