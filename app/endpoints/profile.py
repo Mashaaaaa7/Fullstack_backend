@@ -2,7 +2,6 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy.orm import Session
 from typing import Optional
-from datetime import datetime
 from app.auth import get_current_user, verify_password, get_password_hash
 from app.database import get_db
 from app.models import User
@@ -31,7 +30,6 @@ class ChangePasswordRequest(BaseModel):
             raise ValueError('Пароли не совпадают')
         return v
 
-
 class ChangeEmailRequest(BaseModel):
     new_email: EmailStr
     password: str
@@ -42,8 +40,6 @@ class ChangeEmailResponse(BaseModel):
     message: str
     email: Optional[str] = None
 
-
-# ===== ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ =====
 def log_action(
     db: Session,
     user_id: int,
@@ -63,8 +59,6 @@ def log_action(
     except Exception as e:
         print(f"⚠️ Ошибка логирования: {e}")
 
-
-# ===== ЭНДПОИНТЫ =====
 @router.post("/change-password")
 async def change_password(
     request: ChangePasswordRequest,
@@ -72,7 +66,6 @@ async def change_password(
     db: Session = Depends(get_db)
 ):
     """Смена пароля"""
-    # Получи юзера из БД
     user = db.query(User).filter(User.user_id == current_user.user_id).first()
 
     if not user:
@@ -133,7 +126,6 @@ async def change_password(
         "message": "✅ Пароль успешно изменён"
     }
 
-
 @router.post("/change-email", response_model=ChangeEmailResponse)
 async def change_email(
     request: ChangeEmailRequest,
@@ -149,7 +141,6 @@ async def change_email(
             detail="Пользователь не найден"
         )
 
-    # Проверь пароль
     try:
         if not verify_password(request.password, user.hashed_password):
             raise HTTPException(
@@ -165,7 +156,6 @@ async def change_email(
             detail="Ошибка при проверке пароля"
         )
 
-    # Проверь, что новый email не занят
     existing_user = db.query(User).filter(User.email == request.new_email).first()
     if existing_user and existing_user.user_id != user.user_id:
         raise HTTPException(
@@ -173,14 +163,12 @@ async def change_email(
             detail="Email уже зарегистрирован"
         )
 
-    # Проверь, что email отличается от текущего
     if user.email == request.new_email:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Новый email совпадает с текущим"
         )
 
-    # Обнови email
     try:
         old_email = user.email
         user.email = request.new_email

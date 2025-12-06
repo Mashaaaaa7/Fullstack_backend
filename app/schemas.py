@@ -2,7 +2,6 @@ from pydantic import BaseModel, EmailStr, field_validator
 from datetime import datetime
 from typing import Optional
 
-
 class UserCreate(BaseModel):
     email: EmailStr
     password: str
@@ -14,7 +13,6 @@ class UserCreate(BaseModel):
             raise ValueError('Password must be at least 8 characters')
         return v
 
-
 class UserOut(BaseModel):
     user_id: int
     email: EmailStr
@@ -22,7 +20,6 @@ class UserOut(BaseModel):
 
     class Config:
         from_attributes = True
-
 
 class PDFFileOut(BaseModel):
     id: int
@@ -38,15 +35,12 @@ class PDFFileCreate(BaseModel):
     file_name: str
     file_path: str
 
-
 class Card(BaseModel):
     question: str
     answer: str
 
-
 class CardList(BaseModel):
     cards: list[Card]
-
 
 class LoginResponse(BaseModel):
     access_token: str

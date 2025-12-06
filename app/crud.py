@@ -32,7 +32,6 @@ def save_flashcards(db: Session, pdf_file_id: int, user_id: int, flashcards: lis
         print(f"Error saving flashcards: {e}")
         raise
 
-
 def get_flashcards_by_pdf(db: Session, pdf_file_id: int, user_id: int):
     """Получает карточки по PDF файлу"""
     return db.query(models.Flashcard).filter(
@@ -46,7 +45,6 @@ def delete_flashcards_by_pdf(db: Session, pdf_file_id: int):
         models.Flashcard.pdf_file_id == pdf_file_id
     ).delete()
     db.commit()
-
 
 def add_action(db: Session, action: str, filename: str, user_id: int, details: str = None):
     """Добавляет действие в историю"""

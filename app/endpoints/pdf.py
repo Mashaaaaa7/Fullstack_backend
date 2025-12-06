@@ -68,8 +68,6 @@ async def upload_pdf(
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
-
-# BACKGROUND FUNCTION - Only ONE definition! (with status_id)
 def process_pdf_background(
         file_id: int,
         file_path: str,
@@ -122,8 +120,6 @@ def process_pdf_background(
 
     finally:
         db.close()
-
-# ENDPOINT 2: START PROCESSING
 
 @router.post("/process-pdf/{file_id}")
 async def process_pdf(
@@ -179,7 +175,6 @@ async def process_pdf(
         print(f"❌ Ошибка при запуске обработки: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# ENDPOINT 3: Get Processing Status (to check if done)
 @router.get("/processing-status/{file_id}")
 async def check_processing_status(
         file_id: int,
@@ -221,8 +216,6 @@ async def check_processing_status(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
-# ENDPOINT 4: Get Generated Cards
 @router.get("/cards/{file_id}")
 async def get_cards(
     file_id: int,
@@ -277,8 +270,6 @@ async def get_cards(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
-# ENDPOINT 5: List User's PDFs
 @router.get("/pdfs")
 async def list_user_pdfs(
         user: User = Depends(get_current_user),
@@ -306,8 +297,6 @@ async def list_user_pdfs(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
-# ENDPOINT 6: Get Action History
 @router.get("/history")
 async def get_history(
         user: User = Depends(get_current_user),

@@ -1,4 +1,3 @@
-# app/auth.py
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, EmailStr
 from passlib.context import CryptContext
