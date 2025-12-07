@@ -2,6 +2,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.endpoints import profile, pdf
 from app import auth
+from app.database import engine
+from app.models import Base, User, Flashcard, PDFFile
+
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
