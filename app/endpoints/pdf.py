@@ -5,9 +5,9 @@ from app.auth import get_current_user
 from app.models import User, PDFFile
 from app.database import SessionLocal, get_db
 from app import crud, models
-from app.services.qa_generator import QAGenerator
 import os
 import sys
+from app.services.qa_generator import QAGenerator
 
 router = APIRouter()
 qa_generator = None
@@ -107,7 +107,6 @@ def process_pdf_background(
     except Exception as e:
         print(f"❌ Ошибка при обработке {filename}: {e}", flush=True)
 
-        # ✅ Обновляем статус на "failed"
         try:
             status = db.query(models.ProcessingStatus).filter(
                 models.ProcessingStatus.id == status_id
@@ -127,7 +126,7 @@ async def process_pdf(
         max_cards: int = Query(10, ge=1, le=100),
         user: User = Depends(get_current_user),
         db: Session = Depends(get_db),
-        background_tasks: BackgroundTasks = BackgroundTasks()  # ✅ USE THIS!
+        background_tasks: BackgroundTasks = BackgroundTasks()
 ):
     """Запускает обработку PDF в фоне"""
     try:
