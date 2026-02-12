@@ -40,6 +40,7 @@ class ChangeEmailResponse(BaseModel):
     message: str
     email: Optional[str] = None
 
+
 def log_action(
     db: Session,
     user_id: int,
@@ -65,7 +66,6 @@ async def change_password(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Смена пароля"""
     user = db.query(User).filter(User.user_id == current_user.user_id).first()
 
     if not user:
@@ -181,7 +181,6 @@ async def change_email(
             detail="Ошибка при обновлении email"
         )
 
-    # Логируй действие
     log_action(
         db,
         user.user_id,

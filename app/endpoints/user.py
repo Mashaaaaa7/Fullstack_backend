@@ -23,7 +23,6 @@ def register(user: UserCreate):
         db.add(new_user)
         db.commit()
         db.refresh(new_user)
-
         return {
             "success": True,
             "access_token": create_access_token({"sub": str(new_user.user_id)}),

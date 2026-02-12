@@ -1,6 +1,8 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Boolean
 from sqlalchemy.orm import declarative_base, relationship
 from datetime import datetime, timezone, timedelta
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Boolean, Enum
+import enum
+
 
 Base = declarative_base()
 
@@ -10,11 +12,16 @@ MSK = timezone(timedelta(hours=3))
 def get_msk_time():
     return datetime.now(MSK)
 
+class UserRole(str, enum.Enum):
+    user = "user"
+    admin = "admin"
+
 class User(Base):
     __tablename__ = "users"
     user_id = Column(Integer, primary_key=True)
     email = Column(String(255), unique=True, index=True, nullable=False)
     hashed_password = Column(String(255), nullable=False)
+    role = Column(Enum(UserRole), default=UserRole.user, nullable=False)
 
     pdf_files = relationship("PDFFile", back_populates="user", cascade="all, delete-orphan")
     flashcards = relationship("Flashcard", back_populates="user", cascade="all, delete-orphan")
