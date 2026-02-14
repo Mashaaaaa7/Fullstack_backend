@@ -1,29 +1,52 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from app.database import get_db
-from app.models import User, UserRole
-from app.auth import get_current_user
-
 router = APIRouter(prefix="/admin")
 
 @router.get("/users")
-def list_users(user=Depends(get_current_user), db: Session = Depends(get_db)):
-    if user.role != "admin":
+def list_users(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.role != UserRole.admin:
         raise HTTPException(status_code=403, detail="Access denied")
-    return {"users": [{"id": u.id, "username": u.username, "role": u.role} for u in db.query(User).all()]}
 
+    users = db.query(User).all()
+
+    return {
+        "users": [
+            {
+                "id": u.id,
+                "username": u.username,
+                "role": u.role
+            }
+            for u in users
+        ]
+    }
 
 @router.put("/users/{user_id}/role")
-def change_user_role(user_id: int, role: str, user=Depends(get_current_user), db: Session = Depends(get_db)):
-    if user.role != "admin":
+def change_user_role(
+    user_id: int,
+    data: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.role != UserRole.admin:
         raise HTTPException(status_code=403, detail="Access denied")
-    if role not in ("user", "admin"):
+
+    role = data.get("role")
+
+    if role not in (UserRole.user, UserRole.admin):
         raise HTTPException(status_code=400, detail="Invalid role")
 
-    user = db.query(User).filter(User.id == user_id).first()
-    if not u:
+    target_user = db.query(User).filter(User.id == user_id).first()
+
+    if not target_user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    user.role = role
+    target_user.role = role
     db.commit()
-    return {"success": True, "id": u.id, "role": u.role}
+    db.refresh(target_user)
+
+    return {
+        "success": True,
+        "user_id": target_user.id,
+        "role": target_user.role
+    }

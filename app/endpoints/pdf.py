@@ -248,7 +248,6 @@ async def get_cards(
         "pages": (total + limit - 1) // limit
     }
 
-
 @router.get("/pdfs")
 async def list_pdfs(
     user: User = Depends(get_current_user),
@@ -278,14 +277,13 @@ async def list_pdfs(
         "total": len(pdf_files)
     }
 
-
 @router.get("/history")
 async def get_history(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     if user.role == UserRole.admin:
-        actions = db.query(models.UserAction).all()
+        actions = db.query(models.ActionHistory).all()  # <- заменили здесь
     else:
         actions = crud.get_history(db, user.user_id)
 
@@ -302,7 +300,6 @@ async def get_history(
             for a in actions
         ]
     }
-
 
 @router.delete("/delete-file/{file_id}")
 async def delete_pdf(
@@ -322,3 +319,17 @@ async def delete_pdf(
         "success": True,
         "message": f"{pdf_file.file_name} deleted"
     }
+
+@router.get("/pdfs/{pdf_id}")
+async def get_pdf(
+    pdf_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    pdf = db.query(PDFFile).filter(PDFFile.id == pdf_id).first()
+    if not pdf:
+        raise HTTPException(status_code=404, detail="Файл не найден")
+    if pdf.user_id != user.user_id and user.role != UserRole.admin:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    return {"success": True, "pdf": pdf.file_name}
