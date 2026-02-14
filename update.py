@@ -1,23 +1,30 @@
-import requests
+# make_admin.py
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from app.models import Base, User, UserRole
 
-API_URL = "http://127.0.0.1:8000/api/auth/login"  # адрес сервера
-EMAIL = "your_email@example.com"  # замени на свой email
-PASSWORD = "your_password"        # замени на свой пароль
+# === Настройки базы ===
+DATABASE_URL = "sqlite:///./app.db"  # или твой URL к БД
 
-data = {
-    "email": "mary200438@gmail.com",
-    "password": "Mary2004"
-}
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-try:
-    response = requests.post(API_URL, json=data)
-    if response.status_code == 200:
-        resp_json = response.json()
-        print("✅ Логин успешен!")
-        print("Токен:", resp_json.get("access_token"))
-        print("Полезные данные:", resp_json)
-    else:
-        print(f"❌ Ошибка: {response.status_code}")
-        print(response.json())
-except Exception as e:
-    print("Ошибка при запросе:", e)
+# ID пользователя, которого хотим сделать админом
+TARGET_USER_ID = 1  # поставь нужный user_id
+
+def make_admin(user_id: int):
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.user_id == user_id).first()
+        if not user:
+            print(f"❌ Пользователь с ID {user_id} не найден")
+            return
+
+        user.role = UserRole.admin
+        db.commit()
+        print(f"✅ Пользователь {user.email} теперь админ")
+    finally:
+        db.close()
+
+if __name__ == "__main__":
+    make_admin(TARGET_USER_ID)
