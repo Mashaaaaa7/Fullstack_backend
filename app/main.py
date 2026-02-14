@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.endpoints import profile, pdf
+from app.endpoints import profile, pdf, admin
 from app import auth
 from app.database import engine
 from app.models import Base, User, Flashcard, PDFFile
@@ -20,6 +20,8 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(profile.router, prefix="/api/profile", tags=["profile"])
 app.include_router(pdf.router, prefix="/api/pdf", tags=["pdf"])
+app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
+
 
 @app.get("/")
 def read_root():

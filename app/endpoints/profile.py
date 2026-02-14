@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy.orm import Session
 from typing import Optional
-from app.auth import get_current_user, verify_password, get_password_hash
+from app.endpoints.auth import get_current_user, verify_password, get_password_hash
 from app.database import get_db
 from app.models import User
 from app import crud

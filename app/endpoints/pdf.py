@@ -1,7 +1,7 @@
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.orm import Session
 import uuid
-from app.auth import get_current_user
+from app.endpoints.auth import get_current_user
 from app.models import User, PDFFile
 from app.database import SessionLocal, get_db
 from app import crud, models
@@ -14,7 +14,6 @@ router = APIRouter()
 qa_generator = None
 
 def get_qa_generator():
-    """Инициализация и кеширование генератора QA"""
     global qa_generator
     if qa_generator is None:
         print("🔧 Инициализирую QAGenerator...", flush=True)
@@ -22,7 +21,7 @@ def get_qa_generator():
     return qa_generator
 
 def process_pdf_sync(file_id: int, file_path: str, filename: str, user_id: int, max_cards: int, status_id: int):
-    """Синхронная обработка PDF (для запуска в отдельном потоке)"""
+    #Синхронная обработка PDF (для запуска в отдельном потоке)
     db = SessionLocal()
     try:
         print(f"🔄 Начинаю обработку {filename}...", flush=True)
@@ -74,7 +73,7 @@ def process_pdf_sync(file_id: int, file_path: str, filename: str, user_id: int, 
         db.close()
 
 async def process_pdf_background(file_id: int, file_path: str, filename: str, user_id: int, max_cards: int, status_id: int):
-    """Асинхронная обертка для фоновой обработки PDF"""
+    #Асинхронная обертка для фоновой обработки PDF
     try:
         await asyncio.to_thread(process_pdf_sync, file_id, file_path, filename, user_id, max_cards, status_id)
     except asyncio.CancelledError:
@@ -92,9 +91,6 @@ async def process_pdf_background(file_id: int, file_path: str, filename: str, us
                 PDFFile.user_id == user.user_id,
                 PDFFile.is_deleted == False
             ).first()
-
-# --- Эндпоинты ---
-
 
 @router.post("/upload-pdf")
 async def upload_pdf(
@@ -266,7 +262,7 @@ async def list_pdfs(
     return {
         "success": True,
         "pdfs": [
-            {
+             {
                 "id": p.id,
                 "name": p.file_name,
                 "file_size": os.path.getsize(p.file_path)

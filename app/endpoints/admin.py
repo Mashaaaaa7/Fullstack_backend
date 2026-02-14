@@ -1,9 +1,23 @@
-router = APIRouter(prefix="/admin")
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from pydantic import BaseModel
+
+from app.database import get_db
+from app.models import User, UserRole
+from app.auth import get_current_user
+
+
+class RoleUpdate(BaseModel):
+    role: UserRole
+
+
+router = APIRouter()
+
 
 @router.get("/users")
 def list_users(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     if current_user.role != UserRole.admin:
         raise HTTPException(status_code=403, detail="Access denied")
@@ -13,40 +27,40 @@ def list_users(
     return {
         "users": [
             {
-                "id": u.id,
-                "username": u.username,
-                "role": u.role
+                "id": u.user_id,
+                "email": u.email,
+                "role": u.role.value,
             }
             for u in users
         ]
     }
 
+
 @router.put("/users/{user_id}/role")
 def change_user_role(
     user_id: int,
-    data: dict,
+    payload: RoleUpdate,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     if current_user.role != UserRole.admin:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    role = data.get("role")
-
-    if role not in (UserRole.user, UserRole.admin):
-        raise HTTPException(status_code=400, detail="Invalid role")
-
-    target_user = db.query(User).filter(User.id == user_id).first()
+    target_user = (
+        db.query(User)
+        .filter(User.user_id == user_id)   # ← ВАЖНО
+        .first()
+    )
 
     if not target_user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    target_user.role = role
+    target_user.role = payload.role
     db.commit()
     db.refresh(target_user)
 
     return {
         "success": True,
-        "user_id": target_user.id,
-        "role": target_user.role
+        "user_id": target_user.user_id,
+        "role": target_user.role.value,
     }
