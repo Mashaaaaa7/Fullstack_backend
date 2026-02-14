@@ -4,8 +4,7 @@ from sqlalchemy.orm import sessionmaker
 from app.models import Base, User, UserRole
 
 # === Настройки базы ===
-DATABASE_URL = "sqlite:///./app.db"  # или твой URL к БД
-
+DATABASE_URL = "sqlite:///./app.db"
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
