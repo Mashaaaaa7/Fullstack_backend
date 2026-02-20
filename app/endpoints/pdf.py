@@ -80,17 +80,13 @@ async def process_pdf_background(file_id: int, file_path: str, filename: str, us
         print(f"⚠️ Фоновая задача обработки {filename} была отменена", flush=True)
 
     def get_pdf_for_user(db: Session, user: User, file_id: int):
-        if user.role == UserRole.admin:
-            return db.query(PDFFile).filter(
-                PDFFile.id == file_id,
-                PDFFile.is_deleted == False
-            ).first()
+        if current_user["role"] == "admin":
+            pdf_files = db.query(PDFFile).filter(PDFFile.is_deleted == False).all()
         else:
-            return db.query(PDFFile).filter(
-                PDFFile.id == file_id,
-                PDFFile.user_id == user.user_id,
+            pdf_files = db.query(PDFFile).filter(
+                PDFFile.user_id == 1,  # HARDCODE твой admin user_id=1
                 PDFFile.is_deleted == False
-            ).first()
+            ).all()
 
 @router.post("/upload-pdf")
 async def upload_pdf(
