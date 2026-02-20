@@ -2,8 +2,12 @@ from sqlalchemy.orm import declarative_base, relationship
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Boolean, Enum
 import enum
+import uuid
 
 Base = declarative_base()
+
+def generate_uuid():
+    return str(uuid.uuid4())
 
 # Московское время (UTC+3)
 MSK = timezone(timedelta(hours=3))
@@ -20,6 +24,7 @@ class User(Base):
     email = Column(String(255), unique=True, index=True, nullable=False)
     hashed_password = Column(String(255), nullable=False)
     role = Column(Enum(UserRole), default=UserRole.user, nullable=False)
+    refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
 
     pdf_files = relationship("PDFFile", back_populates="user", cascade="all, delete-orphan")
     flashcards = relationship("Flashcard", back_populates="user", cascade="all, delete-orphan")
@@ -34,6 +39,7 @@ class PDFFile(Base):
     is_deleted = Column(Boolean, default=False)
     created_at = Column(DateTime, default=get_msk_time)
     user = relationship("User", back_populates="pdf_files")
+
     flashcards = relationship("Flashcard", back_populates="pdf_file", cascade="all, delete-orphan")
 
 class Flashcard(Base):
@@ -49,6 +55,7 @@ class Flashcard(Base):
     is_deleted = Column(Boolean, default=False)
     created_at = Column(DateTime, default=get_msk_time)
     pdf_file = relationship("PDFFile", back_populates="flashcards")
+
     user = relationship("User", back_populates="flashcards")
 
 class ActionHistory(Base):
@@ -59,4 +66,18 @@ class ActionHistory(Base):
     details = Column(Text)
     user_id = Column(Integer, ForeignKey('users.user_id', ondelete='CASCADE'), nullable=False)
     created_at = Column(DateTime, default=get_msk_time)
+
     user = relationship("User", back_populates="action_history")
+
+class RefreshToken(Base):
+    __tablename__ = "refresh_tokens"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    user_id = Column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
+    token_hash = Column(String, unique=True, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    revoked = Column(Boolean, default=False)
+    device_info = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+    user = relationship("User", back_populates="refresh_tokens")
