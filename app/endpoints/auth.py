@@ -1,5 +1,5 @@
-from fastapi import APIRouter, HTTPException, Depends, status, Request
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials  # ← ВСЁ ЗДЕСЬ!
+from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
 from typing import Optional
 from passlib.context import CryptContext
@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import User, UserRole
 
-router = APIRouter(prefix="/api/auth")
+router = APIRouter()
 security = HTTPBearer()
 
 SECRET_KEY = "secret_KEY"
@@ -29,48 +29,58 @@ class TokenResponse(BaseModel):
     refresh_token: Optional[str] = None
     token_type: str = "bearer"
 
+
 def validate_password(password: str):
     if len(password) < 8:
         raise HTTPException(status_code=400, detail="Пароль должен содержать не менее 8 символов")
     return True
 
+
 def get_password_hash(password: str):
     validate_password(password)
     return pwd_context.hash(password)
 
+
 def verify_password(plain_password: str, hashed_password: str):
     return pwd_context.verify(plain_password, hashed_password)
+
 
 def create_access_token(user: User):
     expire = datetime.utcnow() + timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS)
     payload = {
-        "sub": str(user.user_id),  # ← user_id, не email!
+        "sub": str(user.user_id),  # ✅ user_id как строка
         "role": user.role.value,
         "exp": expire
     }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
+
 def create_refresh_token(user: User):
     expire = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     payload = {
-        "sub": str(user.user_id),  # ← user_id, не email!
+        "sub": str(user.user_id),  # ✅ user_id как строка
         "exp": expire,
         "type": "refresh"
     }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)) -> User:
+
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security),
+                     db: Session = Depends(get_db)) -> User:
     token = credentials.credentials
-    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-    user_id = int(payload.get("sub"))
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id: int = int(payload.get("sub"))
+        if user_id is None:
+            raise HTTPException(status_code=401, detail="Invalid token")
+    except (JWTError, ValueError):
+        raise HTTPException(status_code=401, detail="Invalid token")
+
     user = db.query(User).filter(User.user_id == user_id).first()
-    if not user:
+    if user is None:
         raise HTTPException(status_code=401, detail="User not found")
     return user
 
-def decode_token(token: str):
-    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-    return payload
 
 @router.post("/register", response_model=TokenResponse)
 def register(user_data: UserCreate, db: Session = Depends(get_db)):
@@ -80,7 +90,7 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
     new_user = User(
         email=user_data.email,
         hashed_password=get_password_hash(user_data.password),
-        role=UserRole.user  # по умолчанию user
+        role=UserRole.user
     )
     db.add(new_user)
     db.commit()
@@ -109,36 +119,6 @@ def login(user_data: UserCreate, db: Session = Depends(get_db)):
         refresh_token=refresh_token
     )
 
-@router.get("/me")
-async def get_current_user_info(current_user: User = Depends(get_current_user)):
-    return {
-        "user_id": current_user.user_id,
-        "email": current_user.email,
-        "role": current_user.role.value
-    }
-
-@router.post("/refresh-token", response_model=TokenResponse)
-def refresh_token(refresh_token: str, db: Session = Depends(get_db)):
-    try:
-        payload = decode_token(refresh_token)
-        if payload.get("type") != "refresh":
-            raise HTTPException(status_code=401, detail="Invalid refresh token")
-
-        user_id = int(payload.get("sub"))
-        user = db.query(User).filter(User.user_id == user_id).first()
-
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-
-        new_access_token = create_access_token(user)
-        new_refresh_token = create_refresh_token(user)
-
-        return TokenResponse(
-            access_token=new_access_token,
-            refresh_token=new_refresh_token
-        )
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid refresh token")
-
-
-__all__ = ["router", "get_current_user"]
+@router.post("/logout")
+def logout(current_user: User = Depends(get_current_user)):
+    return {"success": True, "message": "Сессия успешно завершена"}
