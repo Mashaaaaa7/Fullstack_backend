@@ -8,10 +8,6 @@ class TokenRepository:
         self.db = db
 
     def create_refresh_token(self, user_id: int, expires_at: datetime) -> RefreshToken:
-        """
-        Создаёт новый refresh-токен в БД.
-        Возвращает объект RefreshToken с заполненным id (jti).
-        """
         jti = str(uuid.uuid4())
         token = RefreshToken(
             id=jti,
@@ -25,11 +21,9 @@ class TokenRepository:
         return token
 
     def get_refresh_token(self, jti: str) -> RefreshToken | None:
-        """Возвращает refresh-токен по его jti или None, если не найден."""
         return self.db.query(RefreshToken).filter(RefreshToken.id == jti).first()
 
     def revoke_refresh_token(self, jti: str) -> None:
-        """Помечает refresh-токен как отозванный (revoked = True)."""
         token = self.get_refresh_token(jti)
         if token:
             token.revoked = True

@@ -3,16 +3,23 @@ import fitz
 import re
 
 class QAGeneratorService:
-    def __init__(self):
-        # Модель для генерации вопросов
+    _instance = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._initialize()
+        return cls._instance
+
+    def _initialize(self):
+        print("🔧 Инициализирую QAGenerator...")
+        # Загружаем модели
         self.qg_model_name = "iarfmoose/t5-base-question-generator"
         self.qg_tokenizer = AutoTokenizer.from_pretrained(self.qg_model_name)
         self.qg_model = AutoModelForSeq2SeqLM.from_pretrained(
             self.qg_model_name,
-            device_map="auto"
-        )
-
-        # Модель для извлечения ответа (легкая, быстрый inference)
+            torch_dtype=torch.float32
+        ).to("cpu")
         self.qa_pipeline = pipeline("question-answering", model="distilbert-base-uncased-distilled-squad")
 
     def extract_text(self, pdf_path: str) -> str:

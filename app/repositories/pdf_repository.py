@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from app.models import PDFFile, Flashcard
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 class PDFRepository:
     def __init__(self, db: Session):
@@ -33,7 +33,7 @@ class PDFRepository:
             self.db.refresh(pdf)
         return pdf
 
-    def save_flashcards(self, pdf_file_id: int, user_id: int, flashcards_data: List[dict]) -> List[Flashcard]:
+    def save_flashcards(self, pdf_file_id: int, user_id: int, flashcards_data: List[Dict[str, Any]]) -> List[Flashcard]:
         saved_cards = []
         for card_data in flashcards_data:
             flashcard = Flashcard(
@@ -51,8 +51,27 @@ class PDFRepository:
             self.db.refresh(card)
         return saved_cards
 
-    def get_cards_for_pdf(self, pdf_file_id: int, user_id: Optional[int] = None, admin: bool = False) -> List[Flashcard]:
+    def get_cards_for_pdf(
+        self,
+        pdf_file_id: int,
+        user_id: Optional[int] = None,
+        admin: bool = False,
+        skip: int = 0,
+        limit: int = 6
+    ) -> List[Flashcard]:
         query = self.db.query(Flashcard).filter(Flashcard.pdf_file_id == pdf_file_id)
         if not admin and user_id is not None:
             query = query.filter(Flashcard.user_id == user_id)
-        return query.limit(10).all()
+        # Сортировка по id для стабильной пагинации
+        return query.order_by(Flashcard.id).offset(skip).limit(limit).all()
+
+    def count_cards_for_pdf(
+        self,
+        pdf_file_id: int,
+        user_id: Optional[int] = None,
+        admin: bool = False
+    ) -> int:
+        query = self.db.query(Flashcard).filter(Flashcard.pdf_file_id == pdf_file_id)
+        if not admin and user_id is not None:
+            query = query.filter(Flashcard.user_id == user_id)
+        return query.count()

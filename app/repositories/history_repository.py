@@ -18,10 +18,10 @@ class HistoryRepository:
         self.db.refresh(record)
         return record
 
-    def get_user_history(self, user_id: int) -> List[ActionHistory]:
+    def get_user_history(self, user_id: int, limit: int = 50) -> List[ActionHistory]:
         return self.db.query(ActionHistory).filter(
             ActionHistory.user_id == user_id
-        ).order_by(ActionHistory.created_at.desc()).all()
+        ).order_by(ActionHistory.created_at.desc()).limit(limit).all()
 
     def get_all_history(self) -> List[ActionHistory]:
         return self.db.query(ActionHistory).order_by(ActionHistory.created_at.desc()).all()

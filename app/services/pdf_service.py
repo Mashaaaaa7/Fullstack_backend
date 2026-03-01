@@ -72,19 +72,20 @@ class PDFService:
             result.append({"id": p.id, "name": p.file_name, "file_size": size})
         return {"success": True, "pdfs": result, "total": len(result)}
 
-    def get_cards(self, file_id: int, user: User) -> Dict[str, Any]:
+    def get_cards(self, file_id: int, user: User, skip: int = 0, limit: int = 10) -> Dict[str, Any]:
         pdf_file = self.pdf_repo.get_pdf_by_id(file_id)
         if not pdf_file:
             raise HTTPException(status_code=404, detail="PDF not found")
         if user.role != UserRole.admin and pdf_file.user_id != user.user_id:
             raise HTTPException(status_code=404, detail="PDF not found")
         is_admin = (user.role == UserRole.admin)
-        cards = self.pdf_repo.get_cards_for_pdf(file_id, user.user_id, admin=is_admin)
+        cards = self.pdf_repo.get_cards_for_pdf(file_id, user.user_id, admin=is_admin, skip=skip, limit=limit)
+        total = self.pdf_repo.count_cards_for_pdf(file_id, user.user_id, admin=is_admin)
         return {
             "success": True,
             "file_name": pdf_file.file_name,
             "cards": cards,
-            "total": len(cards)
+            "total": total
         }
 
     def delete_pdf(self, file_id: int, user: User) -> Dict[str, Any]:
@@ -102,11 +103,11 @@ class PDFService:
         )
         return {"success": True, "message": f"{pdf_file.file_name} deleted"}
 
-    def get_history(self, user: User) -> Dict[str, Any]:
+    def get_history(self, user: User, limit: int = 50) -> Dict[str, Any]:
         if user.role == UserRole.admin:
-            actions = self.history_repo.get_all_history()
+            actions = self.history_repo.get_all_history()[:limit]
         else:
-            actions = self.history_repo.get_user_history(user.user_id)
+            actions = self.history_repo.get_user_history(user.user_id)[:limit]
         return {
             "success": True,
             "history": [
@@ -115,7 +116,7 @@ class PDFService:
                     "action": a.action,
                     "filename": a.filename,
                     "details": a.details,
-                    "created_at": a.created_at.isoformat()
+                    "created_at": a.created_at.isoformat() if a.created_at else None
                 } for a in actions
             ]
         }

@@ -35,7 +35,7 @@ class PDFFile(Base):
     id = Column(Integer, primary_key=True)
     file_name = Column(String(255), nullable=False)
     file_path = Column(String(500), nullable=False)
-    user_id = Column(Integer, ForeignKey('users.user_id', ondelete='CASCADE'), nullable=False)
+    user_id = Column(Integer, ForeignKey('users.user_id'), index=True)
     is_deleted = Column(Boolean, default=False)
     created_at = Column(DateTime, default=get_msk_time)
     user = relationship("User", back_populates="pdf_files")
@@ -45,8 +45,8 @@ class PDFFile(Base):
 class Flashcard(Base):
     __tablename__ = "flashcards"
     id = Column(Integer, primary_key=True)
-    pdf_file_id = Column(Integer, ForeignKey('pdf_files.id', ondelete='CASCADE'), nullable=False)
-    user_id = Column(Integer, ForeignKey('users.user_id', ondelete='CASCADE'), nullable=False)
+    pdf_file_id = Column(Integer, ForeignKey('pdf_files.id'), index=True)
+    user_id = Column(Integer, ForeignKey('users.user_id'), index=True)
     question = Column(Text, nullable=False)
     answer = Column(Text, nullable=False)
     context = Column(Text)
@@ -54,6 +54,7 @@ class Flashcard(Base):
     is_hidden = Column(Boolean, default=False)
     is_deleted = Column(Boolean, default=False)
     created_at = Column(DateTime, default=get_msk_time)
+
     pdf_file = relationship("PDFFile", back_populates="flashcards")
 
     user = relationship("User", back_populates="flashcards")
@@ -61,11 +62,11 @@ class Flashcard(Base):
 class ActionHistory(Base):
     __tablename__ = "action_history"
     id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.user_id'), index=True)
+    created_at = Column(DateTime, index=True)
     action = Column(String(100), nullable=False)
     filename = Column(String(255))
     details = Column(Text)
-    user_id = Column(Integer, ForeignKey('users.user_id', ondelete='CASCADE'), nullable=False)
-    created_at = Column(DateTime, default=get_msk_time)
 
     user = relationship("User", back_populates="action_history")
 

@@ -48,7 +48,7 @@ class HistoryItem(BaseModel):
     action: str
     filename: Optional[str] = None
     details: Optional[str] = None
-    created_at: datetime
+    created_at: Optional[datetime] = None
 
 class HistoryResponse(BaseModel):
     success: bool

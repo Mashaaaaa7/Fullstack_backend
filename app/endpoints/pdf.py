@@ -50,11 +50,13 @@ def list_pdfs(
 @router.get("/cards/{file_id}", response_model=CardsResponse)
 def get_cards(
     file_id: int,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(10, ge=1, le=100),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     service = PDFService(db)
-    return service.get_cards(file_id, user)
+    return service.get_cards(file_id, user, skip, limit)
 
 @router.delete("/delete-file/{file_id}", response_model=DeleteResponse)
 def delete_pdf(
