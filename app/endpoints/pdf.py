@@ -89,6 +89,30 @@ async def start_pdf_processing(file_id: int, background_tasks: BackgroundTasks, 
     return {"success": True, "status": "processing", "message": "Обработка запущена"}
 
 
+@router.get("/history")
+async def get_history(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if user.role == UserRole.admin:
+        actions = db.query(models.ActionHistory).all()  # <- заменили здесь
+    else:
+        actions = crud.get_history(db, user.user_id)
+
+    return {
+        "success": True,
+        "history": [
+            {
+                "id": a.id,
+                "action": a.action,
+                "filename": a.filename,
+                "details": a.details,
+                "created_at": a.created_at.isoformat()
+            }
+            for a in actions
+        ]
+    }
+
 @router.get("/pdfs")
 async def list_pdfs(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if user.role == UserRole.admin:
