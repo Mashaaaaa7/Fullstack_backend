@@ -86,7 +86,6 @@ def get_current_user(
         raise HTTPException(status_code=401, detail="User not found")
     return user
 
-# --- Эндпоинты ---
 @router.post("/register", response_model=TokenResponse)
 def register(user_data: UserCreate, request: Request, db: Session = Depends(get_db)):
     if db.query(User).filter(User.email == user_data.email).first():
