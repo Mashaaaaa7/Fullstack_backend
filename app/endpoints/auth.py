@@ -1,30 +1,42 @@
-from fastapi import APIRouter, HTTPException, Depends, status, Request  # <-- добавили Request
-from fastapi.security import HTTPBearer
+from fastapi import APIRouter, HTTPException, Depends, status, Request
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
+from typing import Optional
 from passlib.context import CryptContext
 from jose import jwt, JWTError
 from datetime import datetime, timedelta
-from app.database import SessionLocal
-from app.models import User, UserRole
+from sqlalchemy.orm import Session
+from app.database import get_db
+from app.models import User, UserRole, RefreshToken
+import uuid
 
-
-router = APIRouter(prefix="/api/auth")
+router = APIRouter()
+security = HTTPBearer()
 
 SECRET_KEY = "secret_KEY"
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_HOURS = 24*60
-REFRESH_TOKEN_EXPIRE_DAYS = 365
-security = HTTPBearer()
+ACCESS_TOKEN_EXPIRE_MINUTES = 15
+REFRESH_TOKEN_EXPIRE_DAYS = 7
+
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 
+# --- Pydantic схемы ---
 class UserCreate(BaseModel):
     email: EmailStr
     password: str
 
 class TokenResponse(BaseModel):
     access_token: str
+    refresh_token: Optional[str] = None
     token_type: str = "bearer"
 
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+class LogoutRequest(BaseModel):
+    refresh_token: str
+
+# --- Вспомогательные функции ---
 def validate_password(password: str):
     if len(password) < 8:
         raise HTTPException(status_code=400, detail="Пароль должен содержать не менее 8 символов")
@@ -37,96 +49,160 @@ def get_password_hash(password: str):
 def verify_password(plain_password: str, hashed_password: str):
     return pwd_context.verify(plain_password, hashed_password)
 
-# Создание access token
 def create_access_token(user: User):
-    expire = datetime.utcnow() + timedelta(hours=1)  # короткий срок
-    payload = {"sub": user.email, "role": user.role.value, "exp": expire}
+    expire = datetime.utcnow() + timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS)
+    payload = {
+        "sub": str(user.user_id),
+        "role": user.role.value,
+        "exp": expire
+    }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
-# Создание refresh token
-def create_refresh_token(user: User):
-    expire = datetime.utcnow() + timedelta()
-    payload = {"sub": user.email, "exp": expire}
+def create_refresh_token(user: User, jti: str):
+    expire = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    payload = {
+        "sub": str(user.user_id),
+        "jti": jti,
+        "exp": expire,
+        "type": "refresh"
+    }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
-def decode_token(token: str):
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+) -> User:
+    token = credentials.credentials
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id = payload.get("sub")
-        role = payload.get("role")
-        if user_id is None or role is None:
+        user_id: int = int(payload.get("sub"))
+        if user_id is None:
             raise HTTPException(status_code=401, detail="Invalid token")
-        return int(user_id), role
-    except JWTError:
+    except (JWTError, ValueError):
         raise HTTPException(status_code=401, detail="Invalid token")
 
-def get_current_user(request: Request):
-    auth_header = request.headers.get("Authorization")
-    if not auth_header:
-        raise HTTPException(status_code=401, detail="Missing token")
-    scheme, _, token = auth_header.partition(" ")
-    if scheme.lower() != "bearer":
-        raise HTTPException(status_code=401, detail="Invalid token scheme")
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email = payload.get("sub")
-        role = payload.get("role")
-        if not email or not role:
-            raise HTTPException(status_code=401, detail="Invalid token")
-        # Возвращаем объект с email и role
-        return {"email": email, "role": role}
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if user is None:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
 
 @router.post("/register", response_model=TokenResponse)
-def register(user: UserCreate):
-    db = SessionLocal()
-    try:
-        if db.query(User).filter(User.email == user.email).first():
-            raise HTTPException(status_code=400, detail="Email already registered")
-        new_user = User(email=user.email, hashed_password=get_password_hash(user.password))
-        db.add(new_user)
-        db.commit()
-        db.refresh(new_user)
-        token = create_access_token(new_user)
-        return {"access_token": token}
-    finally:
-        db.close()
+def register(user_data: UserCreate, request: Request, db: Session = Depends(get_db)):
+    if db.query(User).filter(User.email == user_data.email).first():
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    new_user = User(
+        email=user_data.email,
+        hashed_password=get_password_hash(user_data.password),
+        role=UserRole.user
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+
+    access_token = create_access_token(new_user)
+    jti = str(uuid.uuid4())
+    refresh_token = create_refresh_token(new_user, jti)
+
+    expires_at = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    db_refresh = RefreshToken(
+        id=jti,
+        user_id=new_user.user_id,
+        expires_at=expires_at,
+        device_info=request.headers.get("user-agent")
+    )
+    db.add(db_refresh)
+    db.commit()
+
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token
+    )
 
 @router.post("/login", response_model=TokenResponse)
-def login(user: UserCreate):
-    db = SessionLocal()
-    try:
-        db_user = db.query(User).filter(User.email == user.email).first()
-        if not db_user or not verify_password(user.password, db_user.hashed_password):
-            raise HTTPException(status_code=400, detail="Invalid credentials")
-        token = create_access_token(db_user)
-        return {"access_token": token}
-    finally:
-        db.close()
+def login(user_data: UserCreate, request: Request, db: Session = Depends(get_db)):
+    db_user = db.query(User).filter(User.email == user_data.email).first()
+    if not db_user or not verify_password(user_data.password, db_user.hashed_password):
+        raise HTTPException(status_code=400, detail="Invalid credentials")
 
-@router.get("/me")
-async def get_current_user_info(current_user: User = Depends(get_current_user)):
-    return {
-        "user_id": current_user.user_id,
-        "email": current_user.email,
-        "role": current_user.role.value
-    }
+    access_token = create_access_token(db_user)
+    jti = str(uuid.uuid4())
+    refresh_token = create_refresh_token(db_user, jti)
 
-@router.post("/refresh-token", response_model=TokenResponse)
-def refresh_token(refresh_token: str):
+    expires_at = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    db_refresh = RefreshToken(
+        id=jti,
+        user_id=db_user.user_id,
+        expires_at=expires_at,
+        device_info=request.headers.get("user-agent")
+    )
+    db.add(db_refresh)
+    db.commit()
+
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token
+    )
+
+@router.post("/refresh", response_model=TokenResponse)
+def refresh(data: RefreshRequest, request: Request, db: Session = Depends(get_db)):
+    refresh_token = data.refresh_token
     try:
         payload = jwt.decode(refresh_token, SECRET_KEY, algorithms=[ALGORITHM])
-        email = payload.get("sub")
-        if not email:
-            raise HTTPException(status_code=401)
-        # получаем пользователя из БД
-        db = SessionLocal()
-        user = db.query(User).filter(User.email == email).first()
-        db.close()
-        if not user:
-            raise HTTPException(status_code=404)
-        new_access_token = create_access_token(user)
-        return {"access_token": new_access_token}
+        jti = payload.get("jti")
+        user_id = int(payload.get("sub"))
+        if not jti or not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token")
+    except (JWTError, ValueError):
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    db_refresh = db.query(RefreshToken).filter(RefreshToken.id == jti).first()
+    if not db_refresh:
+        raise HTTPException(status_code=401, detail="Refresh token not found")
+    if db_refresh.revoked:
+        raise HTTPException(status_code=401, detail="Refresh token revoked")
+    if db_refresh.expires_at < datetime.utcnow():
+        raise HTTPException(status_code=401, detail="Refresh token expired")
+    if db_refresh.user_id != user_id:
+        raise HTTPException(status_code=401, detail="Token user mismatch")
+
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+
+    # Ротация токена
+    db_refresh.revoked = True
+    new_jti = str(uuid.uuid4())
+    new_refresh_token = create_refresh_token(user, new_jti)
+    new_expires_at = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    db_new_refresh = RefreshToken(
+        id=new_jti,
+        user_id=user.user_id,
+        expires_at=new_expires_at,
+        device_info=request.headers.get("user-agent")
+    )
+    db.add(db_new_refresh)
+    db.commit()
+
+    new_access_token = create_access_token(user)
+
+    return TokenResponse(
+        access_token=new_access_token,
+        refresh_token=new_refresh_token
+    )
+
+@router.post("/logout")
+def logout(data: LogoutRequest, db: Session = Depends(get_db)):
+    refresh_token = data.refresh_token
+    try:
+        payload = jwt.decode(refresh_token, SECRET_KEY, algorithms=[ALGORITHM])
+        jti = payload.get("jti")
     except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid refresh token")
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    db_refresh = db.query(RefreshToken).filter(RefreshToken.id == jti).first()
+    if db_refresh:
+        db_refresh.revoked = True
+        db.commit()
+
+    return {"success": True, "message": "Сессия успешно завершена"}
