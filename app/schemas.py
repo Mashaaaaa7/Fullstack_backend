@@ -21,20 +21,6 @@ class UserOut(BaseModel):
     class Config:
         from_attributes = True
 
-class PDFFileOut(BaseModel):
-    id: int
-    file_name: str
-    file_path: Optional[str] = None
-    user_id: int
-
-    class Config:
-        from_attributes = True
-
-
-class PDFFileCreate(BaseModel):
-    file_name: str
-    file_path: str
-
 class Card(BaseModel):
     question: str
     answer: str
