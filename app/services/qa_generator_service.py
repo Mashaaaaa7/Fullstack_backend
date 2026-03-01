@@ -2,7 +2,7 @@ from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
 import fitz
 import re
 
-class QAGenerator:
+class QAGeneratorService:
     def __init__(self):
         # Модель для генерации вопросов
         self.qg_model_name = "iarfmoose/t5-base-question-generator"
