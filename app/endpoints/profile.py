@@ -4,7 +4,6 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from app.utils.security import verify_password, get_password_hash
 from app.endpoints.auth import get_current_user
-# from app.endpoints.auth import router as auth_router
 from app.database import get_db
 from app.models import User
 from app import crud
@@ -103,7 +102,6 @@ async def change_password(
         # Если не совпадает (ошибка при verify) — это хорошо
         pass
 
-    # Обнови пароль
     try:
         user.hashed_password = get_password_hash(request.new_password)
         db.commit()
@@ -115,7 +113,6 @@ async def change_password(
             detail="Ошибка при обновлении пароля"
         )
 
-    # Логируй действие
     log_action(
         db,
         user.user_id,
@@ -199,7 +196,6 @@ async def change_email(
 @router.get("/me")
 def get_profile(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
 ):
     return {
         "user_id": current_user.user_id,
