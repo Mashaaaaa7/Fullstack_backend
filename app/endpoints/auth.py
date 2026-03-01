@@ -50,7 +50,7 @@ def verify_password(plain_password: str, hashed_password: str):
     return pwd_context.verify(plain_password, hashed_password)
 
 def create_access_token(user: User):
-    expire = datetime.utcnow() + timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS)
+    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     payload = {
         "sub": str(user.user_id),
         "role": user.role.value,
@@ -86,6 +86,7 @@ def get_current_user(
         raise HTTPException(status_code=401, detail="User not found")
     return user
 
+# --- Эндпоинты ---
 @router.post("/register", response_model=TokenResponse)
 def register(user_data: UserCreate, request: Request, db: Session = Depends(get_db)):
     if db.query(User).filter(User.email == user_data.email).first():
@@ -108,8 +109,7 @@ def register(user_data: UserCreate, request: Request, db: Session = Depends(get_
     db_refresh = RefreshToken(
         id=jti,
         user_id=new_user.user_id,
-        expires_at=expires_at,
-        device_info=request.headers.get("user-agent")
+        expires_at=expires_at
     )
     db.add(db_refresh)
     db.commit()
@@ -133,8 +133,7 @@ def login(user_data: UserCreate, request: Request, db: Session = Depends(get_db)
     db_refresh = RefreshToken(
         id=jti,
         user_id=db_user.user_id,
-        expires_at=expires_at,
-        device_info=request.headers.get("user-agent")
+        expires_at=expires_at
     )
     db.add(db_refresh)
     db.commit()
@@ -175,11 +174,12 @@ def refresh(data: RefreshRequest, request: Request, db: Session = Depends(get_db
     new_jti = str(uuid.uuid4())
     new_refresh_token = create_refresh_token(user, new_jti)
     new_expires_at = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+
+    # Создаём новую запись БЕЗ поля device_info
     db_new_refresh = RefreshToken(
         id=new_jti,
         user_id=user.user_id,
-        expires_at=new_expires_at,
-        device_info=request.headers.get("user-agent")
+        expires_at=new_expires_at
     )
     db.add(db_new_refresh)
     db.commit()

@@ -74,10 +74,8 @@ class RefreshToken(Base):
 
     id = Column(String, primary_key=True, default=generate_uuid)
     user_id = Column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
-    token_hash = Column(String, unique=True, nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=False)
     revoked = Column(Boolean, default=False)
-    device_info = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
 
     user = relationship("User", back_populates="refresh_tokens")
