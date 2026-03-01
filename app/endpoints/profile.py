@@ -1,156 +1,129 @@
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy.orm import Session
-import uuid, os
-import asyncio
+from typing import Optional
+from app.utils.security import verify_password, get_password_hash
 from app.endpoints.auth import get_current_user
-from app.database import SessionLocal, get_db
-from app.models import User, PDFFile, UserRole
-from app.services.qa_generator import QAGenerator
+from app.database import get_db
+from app.models import User
+from app import crud
 
 router = APIRouter()
-qa_generator = None
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+    confirm_password: str
 
-def get_pdf_for_user(db: Session, user: User, file_id: int):
-    pdf_file = db.query(PDFFile).filter(
-        PDFFile.id == file_id, PDFFile.is_deleted == False
-    ).first()
-    if not pdf_file:
-        return None
-    if user.role == UserRole.admin or pdf_file.user_id == user.user_id:
-        return pdf_file
-    return None
+    @field_validator('new_password')
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError('Пароль должен быть минимум 8 символов')
+        if len(v) > 100:
+            raise ValueError('Пароль слишком длинный')
+        return v
 
+    @field_validator('confirm_password')
+    @classmethod
+    def validate_confirm(cls, v: str, info) -> str:
+        if 'new_password' in info.data and v != info.data['new_password']:
+            raise ValueError('Пароли не совпадают')
+        return v
 
-def get_qa_generator():
-    global qa_generator
-    if qa_generator is None:
-        print("🔧 Инициализирую QAGenerator...")
-        qa_generator = QAGenerator()
-    return qa_generator
+class ChangeEmailRequest(BaseModel):
+    new_email: EmailStr
+    password: str
 
+class ChangeEmailResponse(BaseModel):
+    success: bool
+    message: str
+    email: Optional[str] = None
 
-# ✅ УПРОЩЁННАЯ обработка БЕЗ статусов/CRUD
-def process_pdf_sync(file_id: int, file_path: str, filename: str, user_id: int, max_cards: int):
-    db = SessionLocal()
+# --- Логирование ---
+def log_action(
+    db: Session,
+    user_id: int,
+    action: str,
+    details: str,
+    filename: str = None
+):
     try:
-        print(f"🔄 Обрабатываю {filename}...")
-        qa_gen = get_qa_generator()
-        flashcards = qa_gen.process_pdf(file_path, max_cards)  # твоя магия
-
-        # Сохраняем в БД (если crud.save_flashcards есть)
-        try:
-            from app import crud
-            crud.save_flashcards(db, file_id, user_id, flashcards)
-        except:
-            print("⚠️ crud.save_flashcards не найден — пропускаем")
-
-        db.commit()
-        print(f"✅ Готово! {len(flashcards) if flashcards else 0} карточек")
+        crud.add_action(
+            db=db,
+            action=action,
+            details=details,
+            filename=filename,
+            user_id=user_id
+        )
     except Exception as e:
-        print(f"❌ Ошибка: {e}")
-    finally:
-        db.close()
+        print(f"⚠️ Ошибка логирования: {e}")
 
+# --- Эндпоинты ---
+@router.get("/me")
+def get_profile(current_user: User = Depends(get_current_user)):
+    return {
+        "user_id": current_user.user_id,
+        "email": current_user.email,
+        "role": current_user.role.value
+    }
 
-async def process_pdf_background(file_id: int, file_path: str, filename: str, user_id: int, max_cards: int):
-    await asyncio.to_thread(process_pdf_sync, file_id, file_path, filename, user_id, max_cards)
-
-
-@router.post("/upload-pdf")
-async def upload_pdf(file: UploadFile = File(...), user: User = Depends(get_current_user),
-                     db: Session = Depends(get_db)):
-    folder = f"uploads/{user.user_id}/"
-    os.makedirs(folder, exist_ok=True)
-    file_ext = os.path.splitext(file.filename)[1]
-    unique_filename = f"{uuid.uuid4()}{file_ext}"
-    file_path = os.path.join(folder, unique_filename)
-
-    contents = await file.read()
-    with open(file_path, "wb") as f:
-        f.write(contents)
-
-    db_file = PDFFile(file_name=file.filename, file_path=file_path, user_id=user.user_id)
-    db.add(db_file)
-    db.commit()
-    db.refresh(db_file)
-    return {"success": True, "file_id": db_file.id, "file_name": file.filename}
-
-
-@router.post("/process-pdf/{file_id}/start")
-async def start_pdf_processing(file_id: int, background_tasks: BackgroundTasks, max_cards: int = Query(20),
-                               user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    pdf_file = get_pdf_for_user(db, user, file_id)
-    if not pdf_file:
-        raise HTTPException(status_code=404, detail="PDF not found")
-
-    background_tasks.add_task(process_pdf_background, file_id, pdf_file.file_path,
-                              pdf_file.file_name, user.user_id, max_cards)
-    return {"success": True, "status": "processing", "message": "Обработка запущена"}
-
-
-@router.get("/history")
-async def get_history(
-    user: User = Depends(get_current_user),
+@router.post("/change-password")
+async def change_password(
+    request: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    if user.role == UserRole.admin:
-        actions = db.query(models.ActionHistory).all()  # <- заменили здесь
-    else:
-        actions = crud.get_history(db, user.user_id)
+    user = db.query(User).filter(User.user_id == current_user.user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
 
-    return {
-        "success": True,
-        "history": [
-            {
-                "id": a.id,
-                "action": a.action,
-                "filename": a.filename,
-                "details": a.details,
-                "created_at": a.created_at.isoformat()
-            }
-            for a in actions
-        ]
-    }
+    # Проверка текущего пароля
+    if not verify_password(request.current_password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Текущий пароль неверный")
 
-@router.get("/pdfs")
-async def list_pdfs(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    if user.role == UserRole.admin:
-        pdf_files = db.query(PDFFile).filter(PDFFile.is_deleted == False).all()
-    else:
-        pdf_files = db.query(PDFFile).filter(PDFFile.user_id == user.user_id, PDFFile.is_deleted == False).all()
-    return {
-        "success": True,
-        "pdfs": [{"id": p.id, "name": p.file_name,
-                  "file_size": os.path.getsize(p.file_path) if os.path.exists(p.file_path) else 0} for p in pdf_files],
-        "total": len(pdf_files)
-    }
+    # Проверка, что новый пароль отличается от старого
+    if verify_password(request.new_password, user.hashed_password):
+        raise HTTPException(status_code=400, detail="Новый пароль совпадает со старым")
 
-
-@router.get("/cards/{file_id}")
-async def get_cards(file_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    pdf_file = get_pdf_for_user(db, user, file_id)
-    if not pdf_file:
-        raise HTTPException(status_code=404, detail="PDF not found")
-
-    try:
-        from app.models import Flashcard
-        if user.role == UserRole.admin:
-            cards = db.query(Flashcard).filter(Flashcard.pdf_file_id == file_id).limit(10).all()
-        else:
-            cards = db.query(Flashcard).filter(Flashcard.pdf_file_id == file_id,
-                                               Flashcard.user_id == user.user_id).limit(10).all()
-    except:
-        cards = []
-
-    return {"success": True, "file_name": pdf_file.file_name, "cards": cards, "total": len(cards)}
-
-
-@router.delete("/delete-file/{file_id}")
-async def delete_pdf(file_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    pdf_file = get_pdf_for_user(db, user, file_id)
-    if not pdf_file:
-        raise HTTPException(status_code=404, detail="PDF not found")
-    pdf_file.is_deleted = True
+    # Обновление пароля
+    user.hashed_password = get_password_hash(request.new_password)
     db.commit()
-    return {"success": True, "message": f"{pdf_file.file_name} deleted"}
+
+    log_action(db, user.user_id, "change_password", "Пароль успешно изменён")
+    return {"success": True, "message": "✅ Пароль успешно изменён"}
+
+@router.post("/change-email", response_model=ChangeEmailResponse)
+async def change_email(
+    request: ChangeEmailRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    user = db.query(User).filter(User.user_id == current_user.user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    # Проверка пароля
+    if not verify_password(request.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Пароль неверный")
+
+    # Проверка, что email не занят другим пользователем
+    existing_user = db.query(User).filter(User.email == request.new_email).first()
+    if existing_user and existing_user.user_id != user.user_id:
+        raise HTTPException(status_code=400, detail="Email уже зарегистрирован")
+
+    # Проверка, что новый email отличается от текущего
+    if user.email == request.new_email:
+        raise HTTPException(status_code=400, detail="Новый email совпадает с текущим")
+
+    # Обновление email
+    old_email = user.email
+    user.email = request.new_email
+    db.commit()
+
+    log_action(db, user.user_id, "change_email", f"Email изменён с {old_email} на {request.new_email}")
+    return {
+        "success": True,
+        "message": "✅ Email успешно изменён",
+        "email": user.email
+    }
