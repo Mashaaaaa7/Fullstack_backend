@@ -1,6 +1,7 @@
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
 import fitz
 import re
+import torch
 
 class QAGeneratorService:
     _instance = None
