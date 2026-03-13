@@ -12,17 +12,16 @@ def register(data: UserCreate, response: Response, db: Session = Depends(get_db)
     service = AuthService(db)
     tokens = service.register(data.email, data.password)
 
-    # Устанавливаем refresh token в httpOnly cookie
     response.set_cookie(
         key="refresh_token",
         value=tokens["refresh_token"],
         httponly=True,
-        secure=True,  # для HTTPS (в разработке можно False)
-        samesite="lax",
+        secure=True,
+        samesite="none",
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
     )
 
-    # Возвращаем только access token в теле
+     # Возвращаем только access token в теле
     return TokenResponse(access_token=tokens["access_token"], token_type="bearer")
 
 
@@ -36,7 +35,7 @@ def login(data: UserCreate, response: Response, db: Session = Depends(get_db)):
         value=tokens["refresh_token"],
         httponly=True,
         secure=True,
-        samesite="lax",
+        samesite="none",
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
     )
 
@@ -59,7 +58,7 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db))
         value=tokens["refresh_token"],
         httponly=True,
         secure=True,
-        samesite="lax",
+        samesite="none",
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
     )
 
