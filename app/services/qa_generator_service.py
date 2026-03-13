@@ -24,12 +24,12 @@ class QAGeneratorService:
         self.qa_pipeline = pipeline("question-answering", model="distilbert-base-uncased-distilled-squad")
 
     def extract_text(self, pdf_path: str) -> str:
-        """Чтение текста из PDF"""
+        #Чтение текста из PDF
         doc = fitz.open(pdf_path)
         return "\n".join(page.get_text() for page in doc)
 
     def split_into_chunks(self, text: str, max_len=900, min_len=300):
-        """Разбиваем текст на куски для генерации вопросов"""
+        #Разбиваем текст на куски для генерации вопросов
         sentences = re.split(r'(?<=[.!?])\s+', text)
         chunks, current = [], ""
         for s in sentences:
@@ -44,7 +44,7 @@ class QAGeneratorService:
         return chunks
 
     def generate_question(self, context: str):
-        """Генерируем вопрос из текста"""
+        #Генерируем вопрос из текста
         prompt = "generate question: " + context
         inputs = self.qg_tokenizer(prompt, return_tensors="pt", truncation=True).to(self.qg_model.device)
         outputs = self.qg_model.generate(**inputs, max_new_tokens=64, do_sample=False)
@@ -52,19 +52,20 @@ class QAGeneratorService:
         return question.strip()
 
     def extract_answer(self, question: str, context: str):
-        """Извлекаем короткий ответ из текста"""
+        #Извлекаем короткий ответ из текста
         result = self.qa_pipeline(question=question, context=context)
         return result["answer"].strip() if result["answer"] else "NONE"
 
     def process_pdf(self, pdf_path: str, max_cards: int):
-        """Основной метод: генерируем карточки по PDF"""
+        #Основной метод: генерируем карточки по PDF
         text = self.extract_text(pdf_path)
         chunks = self.split_into_chunks(text)
         cards = []
 
-        for chunk in chunks:
+        for i, chunk in enumerate(chunks):
             if len(cards) >= max_cards:
                 break
+            print(f"Обработка чанка {i + 1}/{len(chunks)}")
 
             # Генерируем вопрос
             question = self.generate_question(chunk)
