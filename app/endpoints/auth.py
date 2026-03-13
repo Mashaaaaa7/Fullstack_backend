@@ -16,14 +16,17 @@ def register(data: UserCreate, response: Response, db: Session = Depends(get_db)
         key="refresh_token",
         value=tokens["refresh_token"],
         httponly=True,
-        secure=True,
-        samesite="none",
+        secure=False,
+        samesite="lax",
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
     )
 
-     # Возвращаем только access token в теле
-    return TokenResponse(access_token=tokens["access_token"], token_type="bearer")
-
+    # Теперь возвращаем оба токена
+    return TokenResponse(
+        access_token=tokens["access_token"],
+        refresh_token=tokens["refresh_token"],
+        token_type="bearer"
+    )
 
 @router.post("/login", response_model=TokenResponse)
 def login(data: UserCreate, response: Response, db: Session = Depends(get_db)):
@@ -34,13 +37,16 @@ def login(data: UserCreate, response: Response, db: Session = Depends(get_db)):
         key="refresh_token",
         value=tokens["refresh_token"],
         httponly=True,
-        secure=True,
-        samesite="none",
+        secure=False,
+        samesite="lax",
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
     )
 
-    return TokenResponse(access_token=tokens["access_token"], token_type="bearer")
-
+    return TokenResponse(
+        access_token=tokens["access_token"],
+        refresh_token=tokens["refresh_token"],
+        token_type="bearer"
+    )
 
 @router.post("/refresh", response_model=TokenResponse)
 def refresh(request: Request, response: Response, db: Session = Depends(get_db)):
