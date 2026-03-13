@@ -5,6 +5,7 @@ import uuid
 from fastapi import UploadFile, HTTPException
 import logging
 from typing import Optional
+from io import BytesIO
 
 # Настройки из переменных окружения
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "localhost:9000")
@@ -34,21 +35,24 @@ def generate_file_key(original_filename: str) -> str:
     ext = os.path.splitext(original_filename)[1]
     return f"{uuid.uuid4().hex}{ext}"
 
-
 async def upload_file_to_minio(file: UploadFile, bucket: str, file_key: Optional[str] = None) -> str:
+    ensure_bucket(bucket)
     if file_key is None:
         file_key = generate_file_key(file.filename)
 
-    # Читаем содержимое (осторожно с большими файлами!)
+    # Читаем содержимое
     file_data = await file.read()
     file_size = len(file_data)
     content_type = file.content_type or "application/octet-stream"
+
+    # Создаём поток из байтов
+    data_stream = BytesIO(file_data)
 
     try:
         client.put_object(
             bucket_name=bucket,
             object_name=file_key,
-            data=file_data,
+            data=data_stream,  # теперь передаём поток
             length=file_size,
             content_type=content_type
         )
@@ -58,7 +62,6 @@ async def upload_file_to_minio(file: UploadFile, bucket: str, file_key: Optional
         raise HTTPException(status_code=500, detail="Failed to upload file to storage")
     finally:
         await file.close()
-
 
 def delete_file_from_minio(bucket: str, file_key: str):
     try:

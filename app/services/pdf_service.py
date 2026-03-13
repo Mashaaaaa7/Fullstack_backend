@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from fastapi import HTTPException, UploadFile
 from typing import Dict, Any, Optional, List
 from sqlalchemy import or_
+from minio.error import S3Error
 
 from app.repositories.pdf_repository import PDFRepository
 from app.repositories.history_repository import HistoryRepository
@@ -77,17 +78,37 @@ class PDFService:
 
     def process_pdf_sync(self, file_id: int, file_key: str, filename: str, user_id: int, max_cards: int):
         db = SessionLocal()
+        tmp_path = None
         try:
             pdf_repo = PDFRepository(db)
             history_repo = HistoryRepository(db)
             action_log_repo = ActionLogRepository(db)
 
-            # Скачиваем из MinIO во временный файл
-            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-                from app.minio_client import client, MINIO_BUCKET_PDF
-                client.fget_object(MINIO_BUCKET_PDF, file_key, tmp.name)
-                # Генерируем карточки
-                flashcards = self.qa_service.process_pdf(tmp.name, max_cards)
+            from app.minio_client import client, MINIO_BUCKET_PDF
+
+            # Проверяем, существует ли объект в MinIO и не пустой ли он
+            try:
+                info = client.stat_object(MINIO_BUCKET_PDF, file_key)
+                print(f"✅ Объект найден в MinIO: {file_key}, размер {info.size} байт")
+            except S3Error as e:
+                print(f"❌ Объект {file_key} не найден в MinIO: {e}")
+                raise Exception(f"Объект {file_key} не существует в бакете {MINIO_BUCKET_PDF}")
+
+            # Создаём временный файл (можно указать конкретную папку, если нужно)
+            fd, tmp_path = tempfile.mkstemp(suffix=".pdf")
+            os.close(fd)
+
+            # Скачиваем из MinIO
+            client.fget_object(MINIO_BUCKET_PDF, file_key, tmp_path)
+
+            # Проверяем, что файл не пустой
+            downloaded_size = os.path.getsize(tmp_path)
+            print(f"📥 Скачано {downloaded_size} байт в {tmp_path}")
+            if downloaded_size == 0:
+                raise Exception(f"Скачанный файл пуст, ожидалось {info.size} байт")
+
+            # Генерируем карточки
+            flashcards = self.qa_service.process_pdf(tmp_path, max_cards)
 
             # Сохраняем карточки
             pdf_repo.save_flashcards(file_id, user_id, flashcards)
@@ -115,11 +136,17 @@ class PDFService:
         except Exception as e:
             pdf_repo.update_status(file_id, ProcessingStatus.FAILED)
             db.commit()
-            print(f"Error processing PDF {file_id}: {e}")
+            import traceback
+            traceback.print_exc()
+            print(f"Ошибка обработки PDF {file_id}: {e}")
         finally:
             db.close()
-            if os.path.exists(tmp.name):
-                os.unlink(tmp.name)
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.unlink(tmp_path)
+                    print(f"🗑 Временный файл {tmp_path} удалён")
+                except Exception as e:
+                    print(f"Не удалось удалить временный файл {tmp_path}: {e}")
 
     def get_download_url(self, file_id: int, user: User) -> Dict[str, Any]:
         pdf_file = self.pdf_repo.get_pdf_by_id(file_id)
@@ -130,7 +157,11 @@ class PDFService:
         if user.role != UserRole.admin and pdf_file.user_id != user.user_id:
             raise HTTPException(status_code=403, detail="Not enough permissions")
 
-        url = generate_presigned_url(MINIO_BUCKET_PDF, pdf_file.file_key, expires=3600)
+        try:
+            url = generate_presigned_url(MINIO_BUCKET_PDF, pdf_file.file_key, expires=3600)
+        except Exception as e:
+            print(f"Ошибка генерации pre-signed URL для файла {file_id}: {e}")
+            raise HTTPException(status_code=500, detail="Не удалось сгенерировать ссылку для скачивания")
 
         # Логирование
         self.action_log_repo.create(

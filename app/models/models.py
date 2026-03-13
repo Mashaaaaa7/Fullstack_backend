@@ -30,6 +30,7 @@ class User(Base):
     pdf_files = relationship("PDFFile", back_populates="user", cascade="all, delete-orphan")
     flashcards = relationship("Flashcard", back_populates="user", cascade="all, delete-orphan")
     action_history = relationship("ActionHistory", back_populates="user", cascade="all, delete-orphan")
+    action_logs = relationship("ActionLog", back_populates="user", cascade="all, delete-orphan")
 
 class ProcessingStatus(str, enum.Enum):
     UPLOADED = "uploaded"
