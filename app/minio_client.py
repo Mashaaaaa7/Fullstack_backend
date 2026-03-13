@@ -5,6 +5,7 @@ from fastapi import UploadFile, HTTPException
 import uuid
 import logging
 from io import BytesIO
+from datetime import timedelta
 
 # Настройки из переменных окружения
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "localhost:9000")
@@ -36,15 +37,23 @@ def delete_file_from_minio(bucket: str, file_key: str):
     except S3Error as e:
         logging.error(f"MinIO delete error: {e}")
 
-
 def generate_presigned_url(bucket: str, file_key: str, expires: int = 3600) -> str:
     try:
-        url = client.presigned_get_object(bucket, file_key, expires=expires)
+        print(f"🔄 Генерация pre-signed URL для {bucket}/{file_key}")
+        url = client.presigned_get_object(
+            bucket,
+            file_key,
+            expires=timedelta(seconds=expires)  # преобразуем int в timedelta
+        )
+        print(f"✅ Успешно: {url[:100]}...")
         return url
     except S3Error as e:
         logging.error(f"MinIO presigned URL error: {e}")
+        print(f"❌ S3Error: {e}")
         raise HTTPException(status_code=500, detail="Failed to generate download link")
-
+    except Exception as e:
+        print(f"❌ Неизвестная ошибка: {repr(e)}")
+        raise HTTPException(status_code=500, detail="Failed to generate download link")
 
 def generate_file_key(original_filename: str) -> str:
     ext = os.path.splitext(original_filename)[1]
