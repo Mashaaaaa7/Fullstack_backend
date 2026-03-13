@@ -3,6 +3,7 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Boolean, Enum
 import enum
 import uuid
+from sqlalchemy import JSON
 
 Base = declarative_base()
 
@@ -29,18 +30,50 @@ class User(Base):
     pdf_files = relationship("PDFFile", back_populates="user", cascade="all, delete-orphan")
     flashcards = relationship("Flashcard", back_populates="user", cascade="all, delete-orphan")
     action_history = relationship("ActionHistory", back_populates="user", cascade="all, delete-orphan")
+    action_logs = relationship("ActionLog", back_populates="user", cascade="all, delete-orphan")
+
+class ProcessingStatus(str, enum.Enum):
+    UPLOADED = "uploaded"
+    PROCESSING = "processing"
+    PROCESSED = "processed"
+    FAILED = "failed"
+
+class ActionType(str, enum.Enum):
+    UPLOAD = "upload"
+    DOWNLOAD = "download"
+    DELETE = "delete"
+    EDIT = "edit"
+    GENERATE_CARDS = "generate_cards"
 
 class PDFFile(Base):
     __tablename__ = "pdf_files"
     id = Column(Integer, primary_key=True)
-    file_name = Column(String(255), nullable=False)
-    file_path = Column(String(500), nullable=False)
-    user_id = Column(Integer, ForeignKey('users.user_id'), index=True)
+    file_name = Column(String(255), nullable=False)  # оригинальное имя
+    file_key = Column(String(500), unique=True, nullable=False)  # ключ в MinIO (вместо file_path)
+    size = Column(Integer, nullable=False)  # размер в байтах
+    mime_type = Column(String(100), nullable=False)  # application/pdf
+    status = Column(Enum(ProcessingStatus), default=ProcessingStatus.UPLOADED, nullable=False)
+    user_id = Column(Integer, ForeignKey('users.user_id'), index=True, nullable=False)
     is_deleted = Column(Boolean, default=False)
     created_at = Column(DateTime, default=get_msk_time)
-    user = relationship("User", back_populates="pdf_files")
+    updated_at = Column(DateTime, default=get_msk_time, onupdate=get_msk_time)  # для сортировки
 
+    user = relationship("User", back_populates="pdf_files")
     flashcards = relationship("Flashcard", back_populates="pdf_file", cascade="all, delete-orphan")
+    action_logs = relationship("ActionLog", back_populates="pdf_file", cascade="all, delete-orphan")  # добавим позже
+
+class ActionLog(Base):
+    __tablename__ = "action_logs"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.user_id'), nullable=False, index=True)
+    file_id = Column(Integer, ForeignKey('pdf_files.id'), nullable=False, index=True)
+    action = Column(Enum(ActionType), nullable=False)
+    details = Column(JSON, nullable=True)  # дополнительная информация
+    timestamp = Column(DateTime, default=get_msk_time)
+
+    user = relationship("User", back_populates="action_logs")
+    pdf_file = relationship("PDFFile", back_populates="action_logs")
+
 
 class Flashcard(Base):
     __tablename__ = "flashcards"
