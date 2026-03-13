@@ -1,10 +1,9 @@
 import os
 from minio import Minio
 from minio.error import S3Error
-import uuid
 from fastapi import UploadFile, HTTPException
+import uuid
 import logging
-from typing import Optional
 from io import BytesIO
 
 # Настройки из переменных окружения
@@ -31,38 +30,6 @@ def ensure_bucket(bucket: str):
 ensure_bucket(MINIO_BUCKET_PDF)
 
 
-def generate_file_key(original_filename: str) -> str:
-    ext = os.path.splitext(original_filename)[1]
-    return f"{uuid.uuid4().hex}{ext}"
-
-async def upload_file_to_minio(file: UploadFile, bucket: str, file_key: Optional[str] = None) -> str:
-    ensure_bucket(bucket)
-    if file_key is None:
-        file_key = generate_file_key(file.filename)
-
-    # Читаем содержимое
-    file_data = await file.read()
-    file_size = len(file_data)
-    content_type = file.content_type or "application/octet-stream"
-
-    # Создаём поток из байтов
-    data_stream = BytesIO(file_data)
-
-    try:
-        client.put_object(
-            bucket_name=bucket,
-            object_name=file_key,
-            data=data_stream,  # теперь передаём поток
-            length=file_size,
-            content_type=content_type
-        )
-        return file_key
-    except S3Error as e:
-        logging.error(f"MinIO upload error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to upload file to storage")
-    finally:
-        await file.close()
-
 def delete_file_from_minio(bucket: str, file_key: str):
     try:
         client.remove_object(bucket, file_key)
@@ -77,3 +44,29 @@ def generate_presigned_url(bucket: str, file_key: str, expires: int = 3600) -> s
     except S3Error as e:
         logging.error(f"MinIO presigned URL error: {e}")
         raise HTTPException(status_code=500, detail="Failed to generate download link")
+
+
+def generate_file_key(original_filename: str) -> str:
+    ext = os.path.splitext(original_filename)[1]
+    return f"{uuid.uuid4().hex}{ext}"
+
+async def upload_file_to_minio(
+    file_data: bytes,
+    bucket: str,
+    object_name: str,
+    content_type: str
+) -> str:
+    ensure_bucket(bucket)
+    data_stream = BytesIO(file_data)
+    try:
+        client.put_object(
+            bucket_name=bucket,
+            object_name=object_name,
+            data=data_stream,
+            length=len(file_data),
+            content_type=content_type
+        )
+        return object_name
+    except S3Error as e:
+        logging.error(f"MinIO upload error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to upload file to storage")

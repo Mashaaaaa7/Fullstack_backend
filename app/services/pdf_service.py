@@ -27,7 +27,6 @@ class PDFService:
         self.qa_service = QAGeneratorService()
 
     async def upload_pdf(self, file: UploadFile, user: User) -> Dict[str, Any]:
-        # Проверка размера
         contents = await file.read()
         file_size = len(contents)
         if file_size > 10 * 1024 * 1024:  # 10 MB
@@ -38,8 +37,17 @@ class PDFService:
         if mime != "application/pdf":
             raise HTTPException(status_code=400, detail="Only PDF files are allowed")
 
+        # Генерация ключа
+        from app.minio_client import generate_file_key, upload_file_to_minio, MINIO_BUCKET_PDF
+        file_key = generate_file_key(file.filename)
+
         # Загрузка в MinIO
-        file_key = await upload_file_to_minio(file, MINIO_BUCKET_PDF)
+        await upload_file_to_minio(
+            file_data=contents,
+            bucket=MINIO_BUCKET_PDF,
+            object_name=file_key,
+            content_type=file.content_type or "application/pdf"
+        )
 
         # Создание записи в БД
         db_file = self.pdf_repo.create_pdf(
@@ -48,22 +56,6 @@ class PDFService:
             size=file_size,
             mime_type=mime,
             user_id=user.user_id
-        )
-
-        # Логирование в старую историю
-        self.history_repo.add_action(
-            user_id=user.user_id,
-            action="upload",
-            details="Файл загружен в MinIO",
-            filename=file.filename
-        )
-
-        # Логирование в ActionLog
-        self.action_log_repo.create(
-            user_id=user.user_id,
-            file_id=db_file.id,
-            action=ActionType.UPLOAD,
-            details={"filename": file.filename, "size": file_size}
         )
 
         return {"success": True, "file_id": db_file.id, "file_name": file.filename}
