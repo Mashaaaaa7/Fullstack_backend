@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.endpoints import auth, profile, pdf, admin
 from app.database import engine
 from app.models import Base
+from app.routers import dictionary
 
 # Создаём таблицы (если ещё нет)
 Base.metadata.create_all(bind=engine)
@@ -21,6 +22,7 @@ app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(profile.router, prefix="/api/profile", tags=["profile"])
 app.include_router(pdf.router, prefix="/api/pdf", tags=["pdf"])
 app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
+app.include_router(dictionary.router, prefix="/api/dictionary", tags=["dictionary"])
 
 @app.get("/")
 def root():
