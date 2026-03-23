@@ -20,12 +20,13 @@ async def sitemap():
 async def robots():
     content = """User-agent: *
 Allow: /
+Allow: /about
 Disallow: /login
 Disallow: /register
 Disallow: /app
 Disallow: /profile
 Disallow: /admin
 Disallow: /forbidden
-Sitemap: https://yourdomain.com/sitemap.xml
+Sitemap: http://localhost:3000/sitemap.xml
 """
     return content
