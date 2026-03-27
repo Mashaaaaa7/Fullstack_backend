@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import List, Optional
 from enum import Enum
 
@@ -11,9 +11,7 @@ class UserOut(BaseModel):
     email: str
     role: UserRoleEnum
     created_at: Optional[str] = None
-
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 class PaginatedUsersResponse(BaseModel):
     success: bool
