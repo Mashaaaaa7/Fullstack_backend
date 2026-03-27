@@ -24,7 +24,7 @@ class AuthService:
     def login(self, email: str, password: str):
         user = self.user_repo.get_by_email(email)
         if not user or not verify_password(password, user.hashed_password):
-            raise HTTPException(status_code=400, detail="Invalid credentials")
+            raise HTTPException(status_code=401, detail="Invalid credentials")
         return self._create_tokens(user)
 
     def refresh(self, refresh_token: str):

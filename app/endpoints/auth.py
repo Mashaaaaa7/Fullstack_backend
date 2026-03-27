@@ -50,7 +50,6 @@ def login(data: UserCreate, response: Response, db: Session = Depends(get_db)):
 
 @router.post("/refresh", response_model=TokenResponse)
 def refresh(request: Request, response: Response, db: Session = Depends(get_db)):
-    # Читаем refresh token из cookie
     refresh_token = request.cookies.get("refresh_token")
     if not refresh_token:
         raise HTTPException(status_code=401, detail="Refresh token missing")
@@ -58,7 +57,6 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db))
     service = AuthService(db)
     tokens = service.refresh(refresh_token)
 
-    # Устанавливаем новый refresh token в cookie (ротация)
     response.set_cookie(
         key="refresh_token",
         value=tokens["refresh_token"],
@@ -78,7 +76,6 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)):
         service = AuthService(db)
         service.logout(refresh_token)
 
-    # Удаляем cookie на клиенте
     response.delete_cookie("refresh_token")
 
     return {"success": True, "message": "Logged out"}

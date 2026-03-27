@@ -1,7 +1,7 @@
 import os
 from minio import Minio
 from minio.error import S3Error
-from fastapi import UploadFile, HTTPException
+from fastapi import HTTPException
 import uuid
 import logging
 from io import BytesIO
