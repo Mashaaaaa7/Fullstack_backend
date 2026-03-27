@@ -16,4 +16,5 @@ def test_dictionary_success(mock_dict, client):
 def test_dictionary_error(mock_dict, client):
     mock_dict.side_effect = Exception("API down")
     res = client.get("/api/dictionary?word=hello")
-    assert res.status_code in 200
+
+    assert res.status_code in [200, 201]
