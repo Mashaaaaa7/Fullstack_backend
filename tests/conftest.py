@@ -31,5 +31,5 @@ def user_token(client, user_credentials):
 
 @pytest.fixture
 def admin_token(client, admin_credentials):
-    res = client.post("/api/auth/login", json=user_credentials)
+    res = client.post("/api/auth/login", json=admin_credentials)
     return res.json()["access_token"]

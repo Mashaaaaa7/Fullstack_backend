@@ -11,7 +11,6 @@ class AdminService:
     def list_users(self, current_user: User) -> List[Dict[str, Any]]:
         if current_user.role != UserRole.admin:
             raise HTTPException(status_code=403, detail="Access denied")
-        # Получаем всех пользователей
         users = self.user_repo.db.query(User).all()
         return [{"user_id": u.user_id, "email": u.email, "role": u.role.value} for u in users]
 

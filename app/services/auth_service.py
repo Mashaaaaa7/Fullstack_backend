@@ -36,7 +36,6 @@ class AuthService:
         db_token = self.token_repo.get_refresh_token(jti)
         if not db_token or db_token.revoked or db_token.expires_at < datetime.utcnow() or db_token.user_id != user_id:
             raise HTTPException(status_code=401, detail="Refresh token revoked or expired")
-        # ротация
         self.token_repo.revoke_refresh_token(jti)
         user = self.user_repo.get_by_id(user_id)
         if not user:

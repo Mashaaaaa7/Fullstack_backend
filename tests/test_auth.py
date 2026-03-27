@@ -1,7 +1,7 @@
 import pytest
 
 def test_login_success(client, user_credentials):
-    res = client.post("/api/auth", json=user_credentials)
+    res = client.post("/api/auth/login", json=user_credentials)
 
     assert res.status_code == 200
     data = res.json()
@@ -20,7 +20,7 @@ def test_login_invalid_password(client, user_credentials):
 def test_me_requires_auth(client):
     res = client.get("/api/profile/me")
 
-    assert res.status_code == 401
+    assert res.status_code == 403
 
 def test_me_success(client, user_token):
     res = client.get(

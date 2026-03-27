@@ -10,11 +10,6 @@ class UserService:
         self.history_repo = HistoryRepository(db)
 
     def get_profile(self, user_id: int):
-        raise HTTPException(
-            status_code=401,
-            detail="Not authenticated",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
         user = self.user_repo.get_by_id(user_id)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
