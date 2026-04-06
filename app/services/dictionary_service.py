@@ -40,3 +40,6 @@ def normalize_dictionary_data(data: list) -> dict:
         "phonetic": word_data.get("phonetic"),
         "definitions": definitions
     }
+
+def get_dictionary():
+    return {"words": []}

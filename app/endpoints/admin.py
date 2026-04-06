@@ -16,7 +16,6 @@ def list_users(
     role: Optional[str] = Query(None, regex="^(user|admin)$"),
     sort: str = Query("email_asc", regex="^(email_asc|email_desc|created_at_asc|created_at_desc|role_asc|role_desc)$"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role(UserRole.admin))  # проверка прав
 ):
     # Базовый запрос
     query = db.query(User)

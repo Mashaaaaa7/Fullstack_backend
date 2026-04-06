@@ -16,7 +16,7 @@
         </library>
       </libraries>
     </data-source>
-    <data-source source="LOCAL" name=".db" uuid="1a82847a-bba3-49f5-84ee-50eb51432a96">
+    <data-source source="LOCAL" name=".db" group="desktop" uuid="1a82847a-bba3-49f5-84ee-50eb51432a96">
       <driver-ref>f59e2270-1e53-4275-a6ee-5882a863dd6e</driver-ref>
       <synchronize>true</synchronize>
       <jdbc-driver>org.sqlite.JDBC</jdbc-driver>
@@ -30,6 +30,18 @@
           <url>file://$APPLICATION_CONFIG_DIR$/jdbc-drivers/Xerial SQLiteJDBC/3.45.1/org/slf4j/slf4j-api/1.7.36/slf4j-api-1.7.36.jar</url>
         </library>
       </libraries>
+    </data-source>
+    <data-source source="LOCAL" name="MongoDB" group="desktop" uuid="c8ebb0ea-f92f-42eb-b51b-c55f68a0eb60">
+      <driver-ref>mongo.4</driver-ref>
+      <synchronize>true</synchronize>
+      <jdbc-driver>com.dbschema.MongoJdbcDriver</jdbc-driver>
+      <working-dir>$ProjectFileDir$</working-dir>
+    </data-source>
+    <data-source source="LOCAL" name="PostgreSQL" group="desktop" uuid="0429f491-93c2-4941-9b98-5da1d41b6ed6">
+      <driver-ref>postgresql</driver-ref>
+      <synchronize>true</synchronize>
+      <jdbc-driver>org.postgresql.Driver</jdbc-driver>
+      <working-dir>$ProjectFileDir$</working-dir>
     </data-source>
   </component>
 </project>
