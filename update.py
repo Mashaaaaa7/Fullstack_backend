@@ -1,4 +1,3 @@
-# make_admin.py
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from app.models import Base, User, UserRole
@@ -9,7 +8,7 @@ engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # ID пользователя, которого хотим сделать админом
-TARGET_USER_ID = 1  # поставь нужный user_id
+TARGET_USER_ID = 1  
 
 def make_admin(user_id: int):
     db = SessionLocal()
