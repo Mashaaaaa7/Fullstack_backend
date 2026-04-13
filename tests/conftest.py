@@ -1,11 +1,20 @@
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock, patch
+import pytest
+from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.main import app
-import pytest
-from fastapi.testclient import TestClient
+
+@pytest.fixture(autouse=True)
+def mock_qa_service():
+    # Patch where it's USED (pdf_service), not where it's defined
+    with patch("app.services.pdf_service.QAGeneratorService") as mock_cls:
+        mock_cls.return_value = MagicMock()
+        yield mock_cls
+
 
 @pytest.fixture
 def client():

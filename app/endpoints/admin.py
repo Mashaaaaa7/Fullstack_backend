@@ -13,8 +13,8 @@ def list_users(
     page: int = Query(1, ge=1),
     limit: int = Query(10, ge=1, le=100),
     search: Optional[str] = Query(None, max_length=100),
-    role: Optional[str] = Query(None, regex="^(user|admin)$"),
-    sort: str = Query("email_asc", regex="^(email_asc|email_desc|created_at_asc|created_at_desc|role_asc|role_desc)$"),
+    role: Optional[str] = Query(None, pattern="^(user|admin)$"),
+    sort: str = Query("email_asc", pattern="^(email_asc|email_desc|created_at_asc|created_at_desc|role_asc|role_desc)$"),
     db: Session = Depends(get_db),
 ):
     # Базовый запрос

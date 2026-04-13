@@ -3,5 +3,11 @@
 /models/
 /uploads/
 /.idea/git status
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.venv/
 run.py
 update.py

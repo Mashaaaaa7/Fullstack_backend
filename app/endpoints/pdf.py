@@ -42,16 +42,17 @@ def start_processing(
     )
     return {"success": True, "status": "processing", "message": "Обработка запущена"}
 
-@router.get("/list", response_model=dict)  # Можно заменить на схему
+@router.get("/list", response_model=dict)
 def list_pdfs(
     page: int = Query(1, ge=1),
     limit: int = Query(10, ge=1, le=100),
     status: Optional[ProcessingStatus] = Query(None),
     search: Optional[str] = Query(None, max_length=100),
-    sort: str = Query("created_at_desc", regex="^(created_at_desc|created_at_asc|name_asc|name_desc)$"),
+    sort: str = Query("created_at_desc", pattern="^(created_at_desc|created_at_asc|name_asc|name_desc)$"),
     service: PDFService = Depends(get_pdf_service),
     user: User = Depends(get_current_user)
 ):
+
     return service.list_pdfs_filtered(
         user=user,
         page=page,
