@@ -1,20 +1,13 @@
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
-@patch("app.services.dictionary_service.get_dictionary")
-def test_dictionary_success(mock_dict, client):
-    mock_dict.return_value = {
-        "word": "hello",
-        "definition": "test"
-    }
+def test_dictionary_success(client):
+    with patch("app.routers.dictionary.get_word_definition", new_callable=AsyncMock) as mock_dict:
+        mock_dict.return_value = {"word": "hello", "definition": "test"}
+        res = client.get("/api/dictionary?word=hello")
+        assert res.status_code == 200
 
-    res = client.get("/api/dictionary?word=hello")
-
-    assert res.status_code == 200
-
-
-@patch("app.services.dictionary_service.get_dictionary")
-def test_dictionary_error(mock_dict, client):
-    mock_dict.side_effect = Exception("API down")
-    res = client.get("/api/dictionary?word=hello")
-
-    assert res.status_code in [200, 201]
+def test_dictionary_error(client):
+    with patch("app.routers.dictionary.get_word_definition", new_callable=AsyncMock) as mock_dict:
+        mock_dict.side_effect = Exception("API down")
+        res = client.get("/api/dictionary?word=hello")
+        assert res.status_code == 503
