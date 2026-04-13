@@ -19,8 +19,7 @@ def test_login_invalid_password(client, user_credentials):
 
 def test_me_requires_auth(client):
     res = client.get("/api/profile/me")
-
-    assert res.status_code == 403
+    assert res.status_code == 401
 
 def test_me_success(client, user_token):
     res = client.get(

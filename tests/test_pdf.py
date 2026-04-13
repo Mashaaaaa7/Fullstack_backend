@@ -1,5 +1,3 @@
-import io
-
 def test_upload_pdf(client):
     file_content = b"%PDF-1.4 dummy content"
     file_name = 'test.pdf'
