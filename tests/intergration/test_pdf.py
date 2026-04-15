@@ -40,7 +40,6 @@ def test_delete_foreign_pdf(client, user_token):
     assert res.status_code in (403, 404)
 
 def test_admin_cannot_see_other_users_pdfs(client, user_token, admin_token):
-    # Пользователь загружает файл
     file_content = b"%PDF-1.4 dummy content"
     upload = client.post(
         "/api/pdf/upload",
@@ -49,11 +48,11 @@ def test_admin_cannot_see_other_users_pdfs(client, user_token, admin_token):
     )
     assert upload.status_code == 200
 
-    # Администратор запрашивает список — не должен видеть файл пользователя
     res = client.get(
-        "/api/pdf/",
+        "/api/pdf/list",
         headers={"Authorization": f"Bearer {admin_token}"}
     )
     assert res.status_code == 200
-    pdf_names = [p["filename"] for p in res.json()]
+
+    pdf_names = [p["file_name"] for p in res.json()["items"]]  # ← "items" и "file_name"
     assert "user_private.pdf" not in pdf_names
