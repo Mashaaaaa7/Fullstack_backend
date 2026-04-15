@@ -37,7 +37,7 @@ class PDFRepository:
         self.db.query(PDFFile).filter(PDFFile.id == file_id).update({"is_deleted": True})
         self.db.commit()
 
-    def get_user_pdfs(self, user_id: int, admin: bool = False) -> List[PDFFile]:
+    def get_user_pdfs(self, user_id: int, admin: bool = False) -> list[type[PDFFile]]:
         query = self.db.query(PDFFile).filter(PDFFile.is_deleted == False)
         if not admin:
             query = query.filter(PDFFile.user_id == user_id)
@@ -68,7 +68,7 @@ class PDFRepository:
         admin: bool = False,
         skip: int = 0,
         limit: int = 6
-    ) -> List[Flashcard]:
+    ) -> list[type[Flashcard]]:
         query = self.db.query(Flashcard).filter(Flashcard.pdf_file_id == pdf_file_id)
         if not admin and user_id is not None:
             query = query.filter(Flashcard.user_id == user_id)

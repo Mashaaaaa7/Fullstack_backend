@@ -21,7 +21,6 @@ def register(data: UserCreate, response: Response, db: Session = Depends(get_db)
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
     )
 
-    # Теперь возвращаем оба токена
     return TokenResponse(
         access_token=tokens["access_token"],
         refresh_token=tokens["refresh_token"],

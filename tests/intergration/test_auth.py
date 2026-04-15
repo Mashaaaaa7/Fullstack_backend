@@ -1,5 +1,3 @@
-import pytest
-
 def test_login_success(client, user_credentials):
     res = client.post("/api/auth/login", json=user_credentials)
 

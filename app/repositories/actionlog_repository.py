@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from app.models import ActionLog, ActionType
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 
 
 class ActionLogRepository:
@@ -14,10 +14,10 @@ class ActionLogRepository:
         self.db.refresh(log)
         return log
 
-    def get_by_file(self, file_id: int, limit: int = 50) -> List[ActionLog]:
+    def get_by_file(self, file_id: int, limit: int = 50) -> list[type[ActionLog]]:
         return self.db.query(ActionLog).filter(ActionLog.file_id == file_id).order_by(ActionLog.timestamp.desc()).limit(
             limit).all()
 
-    def get_by_user(self, user_id: int, limit: int = 50) -> List[ActionLog]:
+    def get_by_user(self, user_id: int, limit: int = 50) -> list[type[ActionLog]]:
         return self.db.query(ActionLog).filter(ActionLog.user_id == user_id).order_by(ActionLog.timestamp.desc()).limit(
             limit).all()
