@@ -3,33 +3,40 @@ import fitz
 import re
 import torch
 
+
 class QAGeneratorService:
     _instance = None
 
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialize()
+            instance = super().__new__(cls)
+            instance._initialize()
+            cls._instance = instance
         return cls._instance
 
     def _initialize(self):
         print("🔧 Инициализирую QAGenerator...")
-        # Загружаем модели
-        self.qg_model_name = "iarfmoose/t5-base-question-generator"
-        self.qg_tokenizer = AutoTokenizer.from_pretrained(self.qg_model_name)
-        self.qg_model = AutoModelForSeq2SeqLM.from_pretrained(
-            self.qg_model_name,
-            torch_dtype=torch.float32
-        ).to("cpu")
-        self.qa_pipeline = pipeline("question-answering", model="distilbert-base-uncased-distilled-squad")
+        try:
+            self.qg_model_name = "iarfmoose/t5-base-question-generator"
+            self.qg_tokenizer = AutoTokenizer.from_pretrained(self.qg_model_name)
+            self.qg_model = AutoModelForSeq2SeqLM.from_pretrained(
+                self.qg_model_name,
+                torch_dtype=torch.float32
+            ).to("cpu")
+            self.qa_pipeline = pipeline(
+                "question-answering",
+                model="distilbert-base-uncased-distilled-squad"
+            )
+            print("✅ QAGenerator готов")
+        except Exception as e:
+            print(f"❌ Ошибка инициализации QAGenerator: {e}")
+            raise
 
     def extract_text(self, pdf_path: str) -> str:
-        #Чтение текста из PDF
         doc = fitz.open(pdf_path)
         return "\n".join(page.get_text() for page in doc)
 
     def split_into_chunks(self, text: str, max_len=900, min_len=300):
-        #Разбиваем текст на куски для генерации вопросов
         sentences = re.split(r'(?<=[.!?])\s+', text)
         chunks, current = [], ""
         for s in sentences:
@@ -39,25 +46,24 @@ class QAGeneratorService:
                 if len(current) >= min_len:
                     chunks.append(current.strip())
                 current = s
-        if len(current) >= min_len:
+        if current.strip():
             chunks.append(current.strip())
         return chunks
 
     def generate_question(self, context: str):
-        #Генерируем вопрос из текста
         prompt = "generate question: " + context
-        inputs = self.qg_tokenizer(prompt, return_tensors="pt", truncation=True).to(self.qg_model.device)
+        inputs = self.qg_tokenizer(
+            prompt, return_tensors="pt", truncation=True
+        ).to(self.qg_model.device)
         outputs = self.qg_model.generate(**inputs, max_new_tokens=64, do_sample=False)
-        question = self.qg_tokenizer.decode(outputs[0], skip_special_tokens=True)
-        return question.strip()
+        return self.qg_tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
 
     def extract_answer(self, question: str, context: str):
-        #Извлекаем короткий ответ из текста
         result = self.qa_pipeline(question=question, context=context)
-        return result["answer"].strip() if result["answer"] else "NONE"
+        answer = result["answer"].strip()
+        return answer if answer else "NONE"
 
     def process_pdf(self, pdf_path: str, max_cards: int):
-        #Основной метод: генерируем карточки по PDF
         text = self.extract_text(pdf_path)
         chunks = self.split_into_chunks(text)
         cards = []
@@ -66,22 +72,23 @@ class QAGeneratorService:
             if len(cards) >= max_cards:
                 break
             print(f"Обработка чанка {i + 1}/{len(chunks)}")
+            try:
+                question = self.generate_question(chunk)
+                if len(question) < 5:
+                    continue
 
-            # Генерируем вопрос
-            question = self.generate_question(chunk)
-            if len(question) < 5:
+                answer = self.extract_answer(question, chunk)
+                if answer.upper() == "NONE":
+                    continue
+
+                cards.append({
+                    "question": question,
+                    "answer": answer,
+                    "context": chunk[:200],
+                    "source": self.qg_model_name
+                })
+            except Exception as e:
+                print(f"⚠️ Пропускаю чанк {i + 1}: {e}")
                 continue
-
-            # Получаем ответ
-            answer = self.extract_answer(question, chunk)
-            if answer.upper() == "NONE":
-                continue
-
-            cards.append({
-                "question": question,
-                "answer": answer,
-                "context": chunk[:200],
-                "source": "iarfmoose/t5-base-question-generator"
-            })
 
         return cards
