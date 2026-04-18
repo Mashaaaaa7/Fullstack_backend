@@ -10,3 +10,4 @@ __pycache__/
 .env
 .venv/
 update.py
+test.db
