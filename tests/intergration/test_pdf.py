@@ -54,5 +54,5 @@ def test_admin_cannot_see_other_users_pdfs(client, user_token, admin_token):
     )
     assert res.status_code == 200
 
-    pdf_names = [p["file_name"] for p in res.json()["items"]]  # ← "items" и "file_name"
+    pdf_names = [p["file_name"] for p in res.json()["items"]]
     assert "user_private.pdf" not in pdf_names

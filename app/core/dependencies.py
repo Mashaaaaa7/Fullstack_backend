@@ -25,12 +25,12 @@ def get_current_user(
         raise HTTPException(status_code=401, detail="User not found")
     return user
 
-def require_role(required_role: UserRole):
-    def role_checker(current_user: User = Depends(get_current_user)):
+def require_role(role: str | UserRole):
+    required_role = UserRole(role) if isinstance(role, str) else role
+
+    def dependency(current_user: User = Depends(get_current_user)):
         if current_user.role != required_role:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Insufficient permissions"
-            )
+            raise HTTPException(status_code=403, detail="Недостаточно прав")
         return current_user
-    return role_checker
+
+    return dependency

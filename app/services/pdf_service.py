@@ -19,15 +19,15 @@ from app.database import SessionLocal
 
 
 class PDFService:
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, qa_service: QAGeneratorService):
         self.db = db
         self.pdf_repo = PDFRepository(db)
         self.history_repo = HistoryRepository(db)
         self.action_log_repo = ActionLogRepository(db)
-        self.qa_service = QAGeneratorService()
+        self.qa_service = qa_service
 
+    # Остальной код без изменений ↓
     def _get_owned_pdf(self, file_id: int, user: User) -> PDFFile:
-        #Возвращает PDF только если он принадлежит пользователю, иначе 404.
         pdf_file = self.pdf_repo.get_pdf_by_id(file_id)
         if not pdf_file or pdf_file.user_id != user.user_id:
             raise HTTPException(status_code=404, detail="PDF not found")
@@ -130,7 +130,6 @@ class PDFService:
 
     def get_download_url(self, file_id: int, user: User) -> Dict[str, Any]:
         pdf_file = self._get_owned_pdf(file_id, user)
-
         try:
             url = generate_presigned_url(MINIO_BUCKET_PDF, pdf_file.file_key, expires=3600)
         except Exception as e:
@@ -143,7 +142,6 @@ class PDFService:
             action=ActionType.DOWNLOAD,
             details={"url_expires_in": 3600}
         )
-
         return {"download_url": url}
 
     def list_pdfs_filtered(
@@ -159,13 +157,10 @@ class PDFService:
             PDFFile.is_deleted == False,
             PDFFile.user_id == user.user_id
         )
-
         if search:
             query = query.filter(PDFFile.file_name.ilike(f"%{search}%"))
-
         if status:
             query = query.filter(PDFFile.status == status)
-
         if sort == "created_at_desc":
             query = query.order_by(PDFFile.created_at.desc())
         elif sort == "created_at_asc":
@@ -178,21 +173,19 @@ class PDFService:
         total = query.count()
         items = query.offset((page - 1) * limit).limit(limit).all()
 
-        result = [
-            {
-                "id": pdf.id,
-                "file_name": pdf.file_name,
-                "size": pdf.size,
-                "status": pdf.status.value,
-                "created_at": pdf.created_at.isoformat() if pdf.created_at else None,
-                "owner_id": pdf.user_id,
-            }
-            for pdf in items
-        ]
-
         return {
             "success": True,
-            "items": result,
+            "items": [
+                {
+                    "id": pdf.id,
+                    "file_name": pdf.file_name,
+                    "size": pdf.size,
+                    "status": pdf.status.value,
+                    "created_at": pdf.created_at.isoformat() if pdf.created_at else None,
+                    "owner_id": pdf.user_id,
+                }
+                for pdf in items
+            ],
             "total": total,
             "page": page,
             "limit": limit
@@ -200,10 +193,8 @@ class PDFService:
 
     def get_cards(self, file_id: int, user: User, skip: int = 0, limit: int = 10) -> Dict[str, Any]:
         pdf_file = self._get_owned_pdf(file_id, user)
-
         cards = self.pdf_repo.get_cards_for_pdf(file_id, user.user_id, skip=skip, limit=limit)
         total = self.pdf_repo.count_cards_for_pdf(file_id, user.user_id)
-
         return {
             "success": True,
             "file_name": pdf_file.file_name,
@@ -225,29 +216,24 @@ class PDFService:
 
     def delete_pdf(self, file_id: int, user: User) -> Dict[str, Any]:
         pdf_file = self._get_owned_pdf(file_id, user)
-
         delete_file_from_minio(MINIO_BUCKET_PDF, pdf_file.file_key)
         self.pdf_repo.soft_delete_pdf(file_id)
-
         self.history_repo.add_action(
             user_id=user.user_id,
             action="delete",
             details="Файл удалён",
             filename=pdf_file.file_name
         )
-
         self.action_log_repo.create(
             user_id=user.user_id,
             file_id=file_id,
             action=ActionType.DELETE,
             details={"filename": pdf_file.file_name}
         )
-
         return {"success": True, "message": f"{pdf_file.file_name} deleted"}
 
     def get_history(self, user: User, limit: int = 50) -> Dict[str, Any]:
         actions = self.history_repo.get_user_history(user.user_id)[:limit]
-
         return {
             "success": True,
             "history": [

@@ -13,7 +13,7 @@ class TokenRepository:
             id=jti,
             user_id=user_id,
             expires_at=expires_at,
-            revoked=False  # по умолчанию False
+            revoked=False
         )
         self.db.add(token)
         self.db.commit()
