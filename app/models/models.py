@@ -96,7 +96,7 @@ class ActionHistory(Base):
     __tablename__ = "action_history"
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey('users.user_id'), index=True)
-    created_at = Column(DateTime, index=True)
+    created_at = Column(DateTime, default=get_msk_time, nullable=False)
     action = Column(String(100), nullable=False)
     filename = Column(String(255))
     details = Column(Text)

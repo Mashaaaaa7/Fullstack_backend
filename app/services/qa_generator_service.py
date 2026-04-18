@@ -1,35 +1,48 @@
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, AutoModelForQuestionAnswering
 import fitz
 import re
 import torch
 
+
 class QAGeneratorService:
     _instance = None
+    _initialized = False
 
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
-            cls._instance._initialize()
         return cls._instance
 
     def _initialize(self):
+        if self._initialized:
+            return
         print("🔧 Инициализирую QAGenerator...")
-        # Загружаем модели
-        self.qg_model_name = "iarfmoose/t5-base-question-generator"
-        self.qg_tokenizer = AutoTokenizer.from_pretrained(self.qg_model_name)
-        self.qg_model = AutoModelForSeq2SeqLM.from_pretrained(
-            self.qg_model_name,
-            torch_dtype=torch.float32
-        ).to("cpu")
-        self.qa_pipeline = pipeline("question-answering", model="distilbert-base-uncased-distilled-squad")
+        try:
+            # T5 — генерация вопросов
+            self.qg_model_name = "iarfmoose/t5-base-question-generator"
+            self.qg_tokenizer = AutoTokenizer.from_pretrained(self.qg_model_name)
+            self.qg_model = AutoModelForSeq2SeqLM.from_pretrained(
+                self.qg_model_name,
+                torch_dtype=torch.float32
+            ).to("cpu")
+
+            # ✅ DistilBERT — поиск ответов (без pipeline, напрямую)
+            qa_model_name = "distilbert-base-uncased-distilled-squad"
+            self.qa_tokenizer = AutoTokenizer.from_pretrained(qa_model_name)
+            self.qa_model = AutoModelForQuestionAnswering.from_pretrained(qa_model_name)
+            self.qa_model.eval()
+
+            self._initialized = True
+            print("✅ QAGenerator инициализирован")
+        except Exception as e:
+            print(f"❌ Ошибка инициализации QAGenerator: {e}")
+            raise
 
     def extract_text(self, pdf_path: str) -> str:
-        #Чтение текста из PDF
         doc = fitz.open(pdf_path)
         return "\n".join(page.get_text() for page in doc)
 
     def split_into_chunks(self, text: str, max_len=900, min_len=300):
-        #Разбиваем текст на куски для генерации вопросов
         sentences = re.split(r'(?<=[.!?])\s+', text)
         chunks, current = [], ""
         for s in sentences:
@@ -43,21 +56,36 @@ class QAGeneratorService:
             chunks.append(current.strip())
         return chunks
 
-    def generate_question(self, context: str):
-        #Генерируем вопрос из текста
+    def generate_question(self, context: str) -> str:
         prompt = "generate question: " + context
-        inputs = self.qg_tokenizer(prompt, return_tensors="pt", truncation=True).to(self.qg_model.device)
+        inputs = self.qg_tokenizer(
+            prompt, return_tensors="pt", truncation=True
+        ).to(self.qg_model.device)
         outputs = self.qg_model.generate(**inputs, max_new_tokens=64, do_sample=False)
-        question = self.qg_tokenizer.decode(outputs[0], skip_special_tokens=True)
-        return question.strip()
+        return self.qg_tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
 
-    def extract_answer(self, question: str, context: str):
-        #Извлекаем короткий ответ из текста
-        result = self.qa_pipeline(question=question, context=context)
-        return result["answer"].strip() if result["answer"] else "NONE"
+    def extract_answer(self, question: str, context: str) -> str:
+        # ✅ Прямой вызов вместо pipeline()
+        inputs = self.qa_tokenizer(
+            question, context,
+            return_tensors="pt",
+            truncation=True,
+            max_length=512
+        )
+        with torch.no_grad():
+            outputs = self.qa_model(**inputs)
+        start = outputs.start_logits.argmax()
+        end = outputs.end_logits.argmax() + 1
+        tokens = inputs["input_ids"][0][start:end]
+        answer = self.qa_tokenizer.convert_tokens_to_string(
+            self.qa_tokenizer.convert_ids_to_tokens(tokens)
+        ).strip()
+        return answer if answer else "NONE"
 
     def process_pdf(self, pdf_path: str, max_cards: int):
-        #Основной метод: генерируем карточки по PDF
+        if not self._initialized:
+            self._initialize()
+
         text = self.extract_text(pdf_path)
         chunks = self.split_into_chunks(text)
         cards = []
@@ -67,12 +95,10 @@ class QAGeneratorService:
                 break
             print(f"Обработка чанка {i + 1}/{len(chunks)}")
 
-            # Генерируем вопрос
             question = self.generate_question(chunk)
             if len(question) < 5:
                 continue
 
-            # Получаем ответ
             answer = self.extract_answer(question, chunk)
             if answer.upper() == "NONE":
                 continue

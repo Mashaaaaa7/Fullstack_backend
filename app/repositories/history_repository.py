@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from sqlalchemy.orm import Session
 from app.models import ActionHistory
 
@@ -5,7 +7,7 @@ class HistoryRepository:
     def __init__(self, db: Session):
         self.db = db
 
-    def add_action(self, user_id: int, action: str, details: str, filename: str = None) -> ActionHistory:
+    def add_action(self, user_id, action, details, filename):
         record = ActionHistory(
             user_id=user_id,
             action=action,
