@@ -40,6 +40,7 @@ app.include_router(dictionary.router, prefix="/api/dictionary", tags=["dictionar
 app.include_router(seo.router, tags=["seo"])
 app.include_router(landing.router, tags=["landing"])
 
+app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
 
 @app.get("/")
 def root():
