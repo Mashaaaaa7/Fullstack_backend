@@ -18,7 +18,6 @@ class QAGeneratorService:
             return
         print("🔧 Инициализирую QAGenerator...")
         try:
-            # T5 — генерация вопросов
             self.qg_model_name = "iarfmoose/t5-base-question-generator"
             self.qg_tokenizer = AutoTokenizer.from_pretrained(self.qg_model_name)
             self.qg_model = AutoModelForSeq2SeqLM.from_pretrained(
@@ -26,7 +25,6 @@ class QAGeneratorService:
                 torch_dtype=torch.float32
             ).to("cpu")
 
-            # ✅ DistilBERT — поиск ответов (без pipeline, напрямую)
             qa_model_name = "distilbert-base-uncased-distilled-squad"
             self.qa_tokenizer = AutoTokenizer.from_pretrained(qa_model_name)
             self.qa_model = AutoModelForQuestionAnswering.from_pretrained(qa_model_name)
@@ -65,7 +63,6 @@ class QAGeneratorService:
         return self.qg_tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
 
     def extract_answer(self, question: str, context: str) -> str:
-        # ✅ Прямой вызов вместо pipeline()
         inputs = self.qa_tokenizer(
             question, context,
             return_tensors="pt",

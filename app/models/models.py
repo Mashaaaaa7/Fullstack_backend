@@ -10,7 +10,6 @@ Base = declarative_base()
 def generate_uuid():
     return str(uuid.uuid4())
 
-# Московское время (UTC+3)
 MSK = timezone(timedelta(hours=3))
 def get_msk_time():
     return datetime.now(MSK)

@@ -20,7 +20,6 @@ TestingSessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=Fals
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_db():
-    #Создаём таблицы один раз на всю сессию
     Base.metadata.create_all(bind=engine)
     yield
     Base.metadata.drop_all(bind=engine)
@@ -28,7 +27,6 @@ def setup_db():
 
 @pytest.fixture(autouse=True)
 def clean_tables(setup_db):
-    #Очищаем данные между тестами — изоляция без пересоздания схемы"
     yield
     session = TestingSessionLocal()
     for table in reversed(Base.metadata.sorted_tables):

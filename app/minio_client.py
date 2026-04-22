@@ -7,7 +7,6 @@ import logging
 from io import BytesIO
 from datetime import timedelta
 
-# Настройки из переменных окружения
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "localhost:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minioadmin")
