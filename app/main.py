@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from app.minio_client import ensure_bucket, MINIO_BUCKET_PDF
 import asyncio
 
 from fastapi import FastAPI
@@ -13,15 +14,13 @@ from app.routers import dictionary, seo, landing
 
 Base.metadata.create_all(bind=engine)
 
-
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app):
+    # Инициализация при старте сервера
+    ensure_bucket(MINIO_BUCKET_PDF)
     qa = QAGeneratorService()
     await asyncio.to_thread(qa._initialize)
-    app.state.qa_service = qa
-    print("QAGeneratorService готов")
     yield
-
 
 app = FastAPI(lifespan=lifespan)
 
