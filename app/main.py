@@ -19,13 +19,15 @@ async def lifespan(app):
     try:
         ensure_bucket(MINIO_BUCKET_PDF)
     except Exception as e:
-        print(f"⚠️ MinIO недоступен, бакет не создан: {e}")
+        print(f"⚠️ MinIO недоступен: {e}")
 
     qa = QAGeneratorService()
     try:
         await asyncio.to_thread(qa._initialize)
     except Exception as e:
         print(f"⚠️ QAGenerator не инициализирован: {e}")
+
+    app.state.qa_service = qa  # ← ЭТА строка обязательна
 
     yield
 app = FastAPI(lifespan=lifespan)

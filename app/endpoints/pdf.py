@@ -63,8 +63,6 @@ def get_cards(
 ):
     return service.get_cards(file_id, user, skip, limit)
 
-
-# ✅ Динамические роуты — НИЖЕ статичных
 @router.post("/{file_id}/process", response_model=PDFProcessingResponse)
 def start_processing(
     file_id: int,
