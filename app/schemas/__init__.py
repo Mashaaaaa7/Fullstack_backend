@@ -1,1 +1,1 @@
-from app import schemas
+from app import schemas as schemas

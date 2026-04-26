@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from app.models import ActionLog, ActionType
-from typing import Optional, List, Dict, Any
+from typing import Optional, Dict
 
 
 class ActionLogRepository:

@@ -154,7 +154,7 @@ class PDFService:
         sort: str = "created_at_desc"
     ) -> Dict[str, Any]:
         query = self.db.query(PDFFile).filter(
-            PDFFile.is_deleted == False,
+            ~PDFFile.is_deleted == False,
             PDFFile.user_id == user.user_id
         )
         if search:

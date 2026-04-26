@@ -23,7 +23,7 @@ class PDFRepository:
     def get_pdf_by_id(self, file_id: int) -> Optional[PDFFile]:
         return self.db.query(PDFFile).filter(
             PDFFile.id == file_id,
-            PDFFile.is_deleted == False
+            ~PDFFile.is_deleted== False
         ).first()
 
     def get_pdf_by_key(self, file_key: str) -> Optional[PDFFile]:
