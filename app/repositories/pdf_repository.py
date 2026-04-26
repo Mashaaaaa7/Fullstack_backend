@@ -23,7 +23,7 @@ class PDFRepository:
     def get_pdf_by_id(self, file_id: int) -> Optional[PDFFile]:
         return self.db.query(PDFFile).filter(
             PDFFile.id == file_id,
-            ~PDFFile.is_deleted== False
+            ~PDFFile.is_deleted
         ).first()
 
     def get_pdf_by_key(self, file_key: str) -> Optional[PDFFile]:
@@ -38,7 +38,7 @@ class PDFRepository:
         self.db.commit()
 
     def get_user_pdfs(self, user_id: int, admin: bool = False) -> list[type[PDFFile]]:
-        query = self.db.query(PDFFile).filter(PDFFile.is_deleted == False)
+        query = self.db.query(PDFFile).filter(~PDFFile.is_deleted)
         if not admin:
             query = query.filter(PDFFile.user_id == user_id)
         return query.all()
