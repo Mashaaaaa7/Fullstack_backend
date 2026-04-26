@@ -1,4 +1,4 @@
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
@@ -7,12 +7,19 @@ from app.repositories.user_repository import UserRepository
 from app.core.security import decode_token
 from app.models import User, UserRole
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
+
 
 def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: Session = Depends(get_db)
 ) -> User:
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     token = credentials.credentials
     payload = decode_token(token)
     if not payload:
@@ -24,6 +31,7 @@ def get_current_user(
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
     return user
+
 
 def require_role(role: str | UserRole):
     required_role = UserRole(role) if isinstance(role, str) else role

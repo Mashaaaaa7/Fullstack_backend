@@ -26,10 +26,6 @@ def ensure_bucket(bucket: str):
         client.make_bucket(bucket)
         logging.info(f"Bucket '{bucket}' created")
 
-
-ensure_bucket(MINIO_BUCKET_PDF)
-
-
 def delete_file_from_minio(bucket: str, file_key: str):
     try:
         client.remove_object(bucket, file_key)
