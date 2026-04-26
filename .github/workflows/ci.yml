@@ -39,7 +39,7 @@ jobs:
 
       - name: Run tests
         env:
-          DATABASE_URL: postgresql+asyncpg://test_user:test_pass@localhost:5432/test_db
+          DATABASE_URL: postgresql+asyncpg://testuser:testpass@localhost:5432/testdb
           SECRET_KEY: test_secret_key_for_ci
           ENV: test
         run: pytest --cov=app --cov-report=xml -v
