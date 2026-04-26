@@ -45,3 +45,7 @@ app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
 @app.get("/")
 def root():
     return {"message": "API работает"}
+
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
