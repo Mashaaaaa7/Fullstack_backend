@@ -63,7 +63,7 @@ class PDFService:
 
         return {"success": True, "file_id": db_file.id, "file_name": file.filename}
 
-    def start_processing(self, file_id: int, user: User, max_cards: int) -> PDFFile:
+    def start_processing(self, file_id: int, user: User) -> PDFFile:
         return self._get_owned_pdf(file_id, user)
 
     def process_pdf_sync(self, file_id: int, file_key: str, filename: str, user_id: int, max_cards: int):
@@ -154,7 +154,7 @@ class PDFService:
         sort: str = "created_at_desc"
     ) -> Dict[str, Any]:
         query = self.db.query(PDFFile).filter(
-            PDFFile.is_deleted == False,
+            ~PDFFile.is_deleted,
             PDFFile.user_id == user.user_id
         )
         if search:

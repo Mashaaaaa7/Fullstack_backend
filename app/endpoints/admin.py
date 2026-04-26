@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from app.core.dependencies import get_db, require_role
 from app.models import User, UserRole
-from app.schemas.admin import PaginatedUsersResponse, UserOut, RoleUpdate
+from app.schemas.admin import RoleUpdate
 from app.services.admin_service import AdminService
 
 router = APIRouter()

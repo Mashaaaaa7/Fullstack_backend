@@ -1,1 +1,1 @@
-from app import repositories
+from app import repositories as repositories

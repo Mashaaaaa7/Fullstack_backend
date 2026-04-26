@@ -1,2 +1,10 @@
-from .models import Base
-from .models import User, UserRole, PDFFile, Flashcard, ActionHistory, RefreshToken, ProcessingStatus, ActionType, ActionLog
+from .models import Base as Base
+from .models import User as User
+from .models import UserRole as UserRole
+from .models import PDFFile as PDFFile
+from .models import Flashcard as Flashcard
+from .models import ActionHistory as ActionHistory
+from .models import RefreshToken as RefreshToken
+from .models import ProcessingStatus as ProcessingStatus
+from .models import ActionType as ActionType
+from .models import ActionLog as ActionLog
