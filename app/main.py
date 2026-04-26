@@ -19,7 +19,7 @@ async def lifespan(app: FastAPI):
     qa = QAGeneratorService()
     await asyncio.to_thread(qa._initialize)
     app.state.qa_service = qa
-    print("✅ QAGeneratorService готов")
+    print("QAGeneratorService готов")
     yield
 
 
