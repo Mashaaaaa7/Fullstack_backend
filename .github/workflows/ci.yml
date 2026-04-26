@@ -9,20 +9,6 @@ on:
 jobs:
   backend-lint-test:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:15-alpine
-        env:
-          POSTGRES_USER: testuser       # ← вот это имя пользователя
-          POSTGRES_PASSWORD: testpass
-          POSTGRES_DB: testdb
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     steps:
       - uses: actions/checkout@v4
 
@@ -32,16 +18,19 @@ jobs:
           cache: "pip"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt   # ← корень репо
+        run: pip install -r requirements.txt
 
       - name: Lint (ruff)
         run: ruff check app/
 
       - name: Run tests
         env:
-          DATABASE_URL: postgresql+asyncpg://testuser:testpass@localhost:5432/testdb
           SECRET_KEY: test_secret_key_for_ci
           ENV: test
+          DATABASE_URL: sqlite:///./test.db
+          MINIO_ENDPOINT: localhost:9000
+          MINIO_ACCESS_KEY: minioadmin
+          MINIO_SECRET_KEY: minioadmin
         run: pytest --cov=app --cov-report=xml -v
 
   docker-build:
@@ -56,7 +45,7 @@ jobs:
       - name: Build backend image
         uses: docker/build-push-action@v5
         with:
-          context: .           # ← корень репо
+          context: .
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
