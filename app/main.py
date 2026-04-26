@@ -16,12 +16,18 @@ Base.metadata.create_all(bind=engine)
 
 @asynccontextmanager
 async def lifespan(app):
-    # Инициализация при старте сервера
-    ensure_bucket(MINIO_BUCKET_PDF)
-    qa = QAGeneratorService()
-    await asyncio.to_thread(qa._initialize)
-    yield
+    try:
+        ensure_bucket(MINIO_BUCKET_PDF)
+    except Exception as e:
+        print(f"⚠️ MinIO недоступен, бакет не создан: {e}")
 
+    qa = QAGeneratorService()
+    try:
+        await asyncio.to_thread(qa._initialize)
+    except Exception as e:
+        print(f"⚠️ QAGenerator не инициализирован: {e}")
+
+    yield
 app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
