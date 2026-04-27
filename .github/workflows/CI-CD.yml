@@ -75,4 +75,4 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/fullstack-backend:latest
+          tags: ${{ secrets.DOCKER_USERNAME }}/fullstack-backend:latest
