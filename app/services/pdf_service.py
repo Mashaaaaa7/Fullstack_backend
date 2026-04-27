@@ -80,7 +80,15 @@ class PDFService:
         }
 
     def start_processing(self, file_id: int, user: User) -> PDFFile:
-        return self._get_owned_pdf(file_id, user)
+        pdf_file = self._get_owned_pdf(file_id, user)
+
+        if pdf_file.status == ProcessingStatus.PROCESSING:
+            raise HTTPException(status_code=409, detail="File is already being processed")
+
+        self.pdf_repo.update_status(file_id, ProcessingStatus.PROCESSING)
+        self.db.commit()
+
+        return pdf_file
 
     def process_pdf_sync(
         self,
